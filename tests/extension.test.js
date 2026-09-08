@@ -255,3 +255,96 @@ test("Suite 7: On-Demand Batch Download & ZIP Packaging", async (t) => {
     assert.strictEqual(exportBtn.disabled, false, "Export button must be enabled on supported document");
   });
 });
+
+test("Suite 8: Google Sheets In-Cell Images & =IMAGE() Formula Extraction", async (t) => {
+  await t.test("extractFormulaBarImageUrl parses formula bar inputs and data attributes", () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, doc, win } = createMockEnv("https://docs.google.com/spreadsheets/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    assert.strictEqual(typeof win.__letMeSeeSee.extractFormulaBarImageUrl, "function");
+
+    // Case 1: #t-formula-bar-input with double quotes
+    const formulaBar = doc.createElement("div");
+    formulaBar.id = "t-formula-bar-input";
+    formulaBar.textContent = '=IMAGE("https://example.com/products/item1.png")';
+    doc.body.appendChild(formulaBar);
+
+    assert.strictEqual(
+      win.__letMeSeeSee.extractFormulaBarImageUrl(),
+      "https://example.com/products/item1.png",
+      "Should extract URL from #t-formula-bar-input with double quotes"
+    );
+
+    // Case 2: single quotes with options
+    formulaBar.textContent = "=image('https://example.com/avatar.webp', 4, 100, 100)";
+    assert.strictEqual(
+      win.__letMeSeeSee.extractFormulaBarImageUrl(),
+      "https://example.com/avatar.webp",
+      "Should extract URL with single quotes and extra arguments"
+    );
+
+    // Case 3: data-sheets-formula attribute
+    formulaBar.remove();
+    const cellWithAttr = doc.createElement("div");
+    cellWithAttr.setAttribute("data-sheets-formula", '=IMAGE("https://example.com/sheet-icon.svg")');
+    doc.body.appendChild(cellWithAttr);
+
+    assert.strictEqual(
+      win.__letMeSeeSee.extractFormulaBarImageUrl(),
+      "https://example.com/sheet-icon.svg",
+      "Should extract URL from data-sheets-formula attribute"
+    );
+  });
+
+  await t.test("Ir gathers formula bar images and image resources for spreadsheets", () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, doc, win } = createMockEnv("https://docs.google.com/spreadsheets/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    const formulaBar = doc.createElement("div");
+    formulaBar.id = "t-formula-bar-input";
+    formulaBar.textContent = '=IMAGE("https://example.com/embedded-art.jpg")';
+    doc.body.appendChild(formulaBar);
+
+    const mockResources = [
+      { name: "https://docs.google.com/spreadsheets/d/123/sheets-images-rt/abc=s2048" },
+      { name: "https://cdn.example.com/photos/chart.png" },
+      { name: "https://lh3.googleusercontent.com/docsubipk/hash=w100" }
+    ];
+
+    const urls = win.__letMeSeeSee.Ir("spreadsheets", mockResources);
+    assert.ok(urls.includes("https://example.com/embedded-art.jpg"), "Ir must include formula bar image URL");
+    assert.ok(urls.includes("https://cdn.example.com/photos/chart.png"), "Ir must include external image resources");
+    assert.ok(urls.some(u => u.includes("sheets-images-rt")), "Ir must include standard sheets-images-rt URLs");
+  });
+
+  await t.test("Zs click handler responds to in-cell image element and aligns toolbar", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, doc, win } = createMockEnv("https://docs.google.com/spreadsheets/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    const gridContainer = doc.createElement("div");
+    gridContainer.className = "grid4-inner-container";
+    doc.body.appendChild(gridContainer);
+
+    const cell = doc.createElement("div");
+    cell.className = "grid-cell";
+    const cellImg = doc.createElement("img");
+    cellImg.src = "https://example.com/in-cell-photo.png";
+    cell.appendChild(cellImg);
+    gridContainer.appendChild(cell);
+
+    // Call Zs with target inside grid4-inner-container
+    await win.__letMeSeeSee.Zs({
+      target: cellImg,
+      clientX: 50,
+      clientY: 60
+    });
+
+    const toolbar = doc.getElementById("letMeSeeSeeToolbar");
+    assert.ok(toolbar, "Toolbar should exist");
+    assert.notStrictEqual(toolbar.style.getPropertyValue("display"), "none", "Toolbar should be shown on cell click");
+  });
+});
+

@@ -24,7 +24,7 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
       };
       this.attributes = {};
       this._className = "";
-      this.isConnected = true;
+      this.parentElement = null;
     }
     set className(val) {
       this._className = val || "";
@@ -35,14 +35,58 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
     }
     setAttribute(k, v) { this.attributes[k] = v; if (k === "id") this.id = v; }
     getAttribute(k) { return this.attributes[k] || null; }
-    appendChild(el) { this.children.push(el); return el; }
-    append(...els) { this.children.push(...els); }
-    remove() { this.isConnected = false; }
-    replaceChildren(...els) { this.children = [...els]; }
+    appendChild(el) {
+      if (el) {
+        el.parentElement = this;
+        this.children.push(el);
+      }
+      return el;
+    }
+    append(...els) {
+      for (const el of els) this.appendChild(el);
+    }
+    remove() {
+      this.isConnected = false;
+      if (this.parentElement) {
+        this.parentElement.children = this.parentElement.children.filter(c => c !== this);
+      }
+    }
+    replaceChildren(...els) {
+      this.children = [];
+      for (const el of els) this.appendChild(el);
+    }
     getBoundingClientRect() { return { left: 10, top: 20, right: 110, bottom: 120, width: 100, height: 100 }; }
-    querySelectorAll(sel) { return []; }
-    querySelector(sel) { return null; }
-    closest(sel) { return null; }
+    matches(sel) { return matchesSelector(this, sel); }
+    closest(sel) {
+      let cur = this;
+      while (cur) {
+        if (matchesSelector(cur, sel)) return cur;
+        cur = cur.parentElement;
+      }
+      return null;
+    }
+    querySelector(sel) {
+      const search = (node) => {
+        for (const child of node.children || []) {
+          if (matchesSelector(child, sel)) return child;
+          const found = search(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      return search(this);
+    }
+    querySelectorAll(sel) {
+      const res = [];
+      const search = (node) => {
+        for (const child of node.children || []) {
+          if (matchesSelector(child, sel)) res.push(child);
+          search(child);
+        }
+      };
+      search(this);
+      return res;
+    }
     addEventListener(type, fn) {
       this._listeners = this._listeners || {};
       this._listeners[type] = this._listeners[type] || [];
@@ -65,6 +109,39 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
       if (this.onclick) this.onclick({ target: this, type: "click" });
       this.dispatchEvent({ target: this, type: "click" });
     }
+  }
+
+  function matchesSelector(el, sel) {
+    if (!el || !sel) return false;
+    const parts = sel.split(",").map(s => s.trim());
+    for (const part of parts) {
+      if (part.startsWith(".")) {
+        const cls = part.slice(1);
+        if (el.classList && el.classList.contains(cls)) return true;
+      } else if (part.startsWith("#")) {
+        const id = part.slice(1);
+        if (el.id === id || el.getAttribute("id") === id) return true;
+      } else if (part.startsWith("[") && part.endsWith("]")) {
+        const clean = part.slice(1, -1);
+        if (clean.includes("*=")) {
+          const [attr, rawVal] = clean.split("*=");
+          const val = rawVal.replace(/\s+i$/i, "");
+          const matchVal = val.replace(/["']/g, "").trim().toLowerCase();
+          const attrVal = (el.getAttribute(attr.trim()) || "").toLowerCase();
+          if (attrVal.includes(matchVal)) return true;
+        } else if (clean.includes("=")) {
+          const [attr, rawVal] = clean.split("=");
+          const val = rawVal.replace(/\s+i$/i, "");
+          const matchVal = val.replace(/["']/g, "").trim();
+          if (el.getAttribute(attr.trim()) === matchVal) return true;
+        } else {
+          if (el.getAttribute(clean) != null) return true;
+        }
+      } else if (el.tagName && el.tagName.toLowerCase() === part.toLowerCase()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   const docBody = new MockElement("body");
@@ -113,24 +190,26 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
       return find(docBody) || find(docHead);
     },
     querySelector(sel) {
-      const match = (el) => {
-        if (sel.startsWith(".")) {
-          if (el.classList && el.classList.contains(sel.slice(1))) return el;
-        } else if (sel.startsWith("#")) {
-          if (el.id === sel.slice(1)) return el;
-        } else if (el.tagName && el.tagName.toLowerCase() === sel.toLowerCase()) {
-          return el;
-        }
-        for (const c of el.children || []) {
-          const res = match(c);
-          if (res) return res;
-        }
-        return null;
-      };
-      return match(docBody) || match(docHead);
+      if (matchesSelector(docBody, sel)) return docBody;
+      const bFound = docBody.querySelector(sel);
+      if (bFound) return bFound;
+      if (matchesSelector(docHead, sel)) return docHead;
+      return docHead.querySelector(sel);
     },
-    getElementsByClassName(cls) { return []; },
-    querySelectorAll(sel) { return []; },
+    getElementsByClassName(cls) { return this.querySelectorAll("." + cls); },
+    querySelectorAll(sel) {
+      const res = [];
+      const search = (node) => {
+        if (!node) return;
+        for (const child of node.children || []) {
+          if (matchesSelector(child, sel)) res.push(child);
+          search(child);
+        }
+      };
+      search(docBody);
+      search(docHead);
+      return res;
+    },
     addEventListener(type, fn, opts) {
       listeners.doc[type] = listeners.doc[type] || [];
       listeners.doc[type].push(fn);

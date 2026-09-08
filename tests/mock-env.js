@@ -26,6 +26,11 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
       this._className = "";
       this.parentElement = null;
     }
+    set src(val) { this.attributes["src"] = val; this._src = val; }
+    get src() { return this.attributes["src"] || this._src || ""; }
+    set href(val) { this.attributes["href"] = val; this._href = val; }
+    get href() { return this.attributes["href"] || this._href || ""; }
+    async decode() { return Promise.resolve(); }
     set className(val) {
       this._className = val || "";
       this._className.split(/\s+/).forEach(c => c && this.classList.add(c));
@@ -136,6 +141,16 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
           if (el.getAttribute(attr.trim()) === matchVal) return true;
         } else {
           if (el.getAttribute(clean) != null) return true;
+        }
+      } else if (part.includes(" ")) {
+        const subParts = part.split(/\s+/).filter(Boolean);
+        const last = subParts[subParts.length - 1];
+        if (matchesSelector(el, last)) {
+          let cur = el.parentElement;
+          while (cur) {
+            if (matchesSelector(cur, subParts[0])) return true;
+            cur = cur.parentElement;
+          }
         }
       } else if (el.tagName && el.tagName.toLowerCase() === part.toLowerCase()) {
         return true;

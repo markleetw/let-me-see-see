@@ -75,6 +75,10 @@ test("Suite 2: Floating Toolbar & Action Button Construction", (t) => {
   assert.ok(copyBtn, "Copy image button (CopyImageIconBtn) must be rendered");
   assert.strictEqual(copyBtn.getAttribute("aria-label"), "Copy image");
 
+  const ocrBtn = doc.getElementById("OcrTextIconBtn");
+  assert.ok(ocrBtn, "OCR text button (OcrTextIconBtn) must be rendered");
+  assert.strictEqual(ocrBtn.getAttribute("aria-label"), "圖片文字辨識複製 (OCR)");
+
   const downloadBtn = doc.getElementById("DownloadIconBtn");
   assert.ok(downloadBtn, "Download image button (DownloadIconBtn) must be rendered");
   assert.strictEqual(downloadBtn.getAttribute("aria-label"), "Download image");
@@ -347,4 +351,73 @@ test("Suite 8: Google Sheets In-Cell Images & =IMAGE() Formula Extraction", asyn
     assert.notStrictEqual(toolbar.style.getPropertyValue("display"), "none", "Toolbar should be shown on cell click");
   });
 });
+
+test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
+  await t.test("ocrImageToText recognizes text with TextDetector and writes to clipboard", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+
+    let writtenText = "";
+    win.navigator.clipboard.writeText = async (txt) => {
+      writtenText = txt;
+    };
+
+    // Provide mock TextDetector
+    win.TextDetector = class MockTextDetector {
+      async detect(source) {
+        return [
+          { rawValue: "Hello World" },
+          { rawValue: "2026 Q3 Financial Report" }
+        ];
+      }
+    };
+
+    vm.runInNewContext(script, context);
+
+    assert.strictEqual(typeof win.__letMeSeeSee.ocrImageToText, "function");
+
+    const ok = await win.__letMeSeeSee.ocrImageToText("https://example.com/report-chart.png");
+    assert.strictEqual(ok, true, "OCR extraction should succeed");
+    assert.strictEqual(writtenText, "Hello World\n2026 Q3 Financial Report", "Extracted text must be written to clipboard");
+  });
+
+  await t.test("ocrImageToText falls back to DOM metadata when TextDetector is unavailable", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, doc, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+
+    let writtenText = "";
+    win.navigator.clipboard.writeText = async (txt) => {
+      writtenText = txt;
+    };
+    delete win.TextDetector;
+
+    // Create img with alt text
+    const img = doc.createElement("img");
+    img.src = "https://example.com/quarterly-plan.png";
+    img.setAttribute("alt", "季度策略發展規劃圖");
+    doc.body.appendChild(img);
+
+    vm.runInNewContext(script, context);
+
+    const ok = await win.__letMeSeeSee.ocrImageToText("https://example.com/quarterly-plan.png");
+    assert.strictEqual(ok, true, "OCR extraction via metadata fallback should succeed");
+    assert.strictEqual(writtenText, "季度策略發展規劃圖", "Alt text must be written to clipboard");
+  });
+
+  await t.test("ocrImageToText reports failure toast when empty or not found", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, doc, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    delete win.TextDetector;
+
+    vm.runInNewContext(script, context);
+
+    const ok = await win.__letMeSeeSee.ocrImageToText("");
+    assert.strictEqual(ok, false, "OCR on empty url should fail");
+
+    const toast = doc.getElementById("let-me-see-see-toast");
+    assert.ok(toast, "Toast must be displayed on failure");
+    assert.ok(toast.textContent.includes("未指定圖片"), "Toast must display warning message");
+  });
+});
+
 

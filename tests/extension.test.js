@@ -78,6 +78,10 @@ test("Suite 2: Floating Toolbar & Action Button Construction", (t) => {
   const downloadBtn = doc.getElementById("DownloadIconBtn");
   assert.ok(downloadBtn, "Download image button (DownloadIconBtn) must be rendered");
   assert.strictEqual(downloadBtn.getAttribute("aria-label"), "Download image");
+
+  const batchBtn = doc.getElementById("BatchDownloadIconBtn");
+  assert.ok(batchBtn, "Batch download button (BatchDownloadIconBtn) must be rendered");
+  assert.strictEqual(batchBtn.getAttribute("aria-label"), "打包下載全文件圖片 (ZIP)");
 });
 
 test("Suite 3: Chinese & Unicode Document Title and Download Filename Sanitization", (t) => {
@@ -189,4 +193,65 @@ test("Suite 6: Background Service Worker Initialization", (t) => {
   }, "Background service worker must initialize cleanly without error");
 
   assert.ok(chromeMock.runtime.onMessage._listeners.length > 0, "Background worker must register message listeners for storage sync");
+});
+
+test("Suite 7: On-Demand Batch Download & ZIP Packaging", async (t) => {
+  await t.test("Batch download message triggers scan, zip generation, and download", async () => {
+    const freshScript = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win, chromeMock } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(freshScript, context);
+
+    assert.ok(typeof win.__letMeSeeSee.batchDownloadAllImages === "function", "batchDownloadAllImages must be exposed");
+
+    // Test Cs directly with simulated image URLs
+    const sampleUrls = [
+      "https://lh3.googleusercontent.com/docsubipk/sample1=s2048",
+      "https://lh3.googleusercontent.com/docsubipk/sample2=s2048"
+    ];
+    let progressCalls = [];
+    const result = await win.__letMeSeeSee.Cs(sampleUrls, (done, total) => {
+      progressCalls.push({ done, total });
+    });
+
+    assert.strictEqual(result.downloaded, 2, "Must report 2 downloaded files in zip");
+    assert.strictEqual(result.failed, 0, "Must report 0 failed files");
+    assert.strictEqual(progressCalls.length, 2, "onProgress must be called for each file");
+
+    // Test runtime message 'batch-download-images'
+    const listener = chromeMock.runtime.onMessage._listeners[0];
+    assert.ok(listener, "Runtime message listener must be present");
+    const response = await new Promise(resolve => {
+      listener({ type: "batch-download-images" }, {}, resolve);
+    });
+    assert.ok(response, "Must respond to batch-download-images message");
+    assert.ok(typeof response.downloaded === "number", "Response must include downloaded count");
+  });
+
+  await t.test("Popup UI: mounts batch export section and button", async () => {
+    const popupScript = fs.readFileSync("dist/popup/popup.js", "utf8");
+    const { context, doc, win, chromeMock } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    
+    // Simulate popup environment with .popup container
+    const popupMain = new context.Element("main");
+    popupMain.className = "popup";
+    doc.body.appendChild(popupMain);
+
+    chromeMock.tabs = {
+      query: async () => [{ id: 101, url: "https://docs.google.com/document/d/123/edit" }],
+      sendMessage: async (tabId, msg) => {
+        if (msg.type === "get-document-type") return "document";
+        if (msg.type === "batch-download-images") return { downloaded: 5, failed: 0 };
+        return null;
+      }
+    };
+
+    vm.runInNewContext(popupScript, context);
+    await new Promise(r => setTimeout(r, 50));
+
+    const exportSection = doc.getElementById("lmss-batch-export-section");
+    assert.ok(exportSection, "Popup must mount #lmss-batch-export-section");
+    const exportBtn = doc.getElementById("lmss-batch-export-btn");
+    assert.ok(exportBtn, "Popup must render #lmss-batch-export-btn");
+    assert.strictEqual(exportBtn.disabled, false, "Export button must be enabled on supported document");
+  });
 });

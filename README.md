@@ -144,6 +144,7 @@ let-me-see-see/
 
 ---
 
-## 📄 授權說明 (License)
+## 📄 授權與免責聲明 (License & Disclaimer)
 
-本專案受到 Google Docs Image Zoom 啟發，採用 MIT License 開源發布。
+* **啟發與致敬**：本專案受到 [Google Docs Image Zoom](https://chromewebstore.google.com/detail/google-docs-image-zoom/jpbamfkmnggnnkeipgnomogpdclocibk) 啟發，採用 MIT License 開源發布。
+* **免責聲明**：本專案主要為 AI 協同開發（Vibe Coding）之產物，程式碼僅供技術交流與個人便利使用。使用者請自行評估使用風險，開發者不對使用過程中所產生之任何直接、間接或衍生之問題與損害承擔責任。

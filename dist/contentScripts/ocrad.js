@@ -18,7 +18,7 @@ var OCRAD = (function(){
 // before the code. Then that object will be used in the code, and you
 // can continue to use Module afterwards as well.
 var Module;
-if (!Module) Module = eval('(function() { try { return Module || {} } catch(e) { return {} } })()');
+if (!Module) Module = (function() { try { return (typeof Module !== "undefined" && Module) || {} } catch(e) { return {} } })();
 // Sometimes an existing Module object exists with properties
 // meant to overwrite the default module functionality. Here
 // we collect those properties and reapply _after_ we configure
@@ -82,7 +82,7 @@ else if (ENVIRONMENT_IS_SHELL) {
     Module['arguments'] = arguments;
   }
   this['Module'] = Module;
-  eval("if (typeof gc === 'function' && gc.toString().indexOf('[native code]') > 0) var gc = undefined"); // wipe out the SpiderMonkey shell 'gc' function, which can confuse closure (uses it as a minified name, and it is then initted to a non-falsey value unexpectedly)
+  // eval SpiderMonkey shell gc removed for CSP
 }
 else if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
   Module['read'] = function read(url) {
@@ -390,7 +390,7 @@ var Runtime = {
     for (var i = 0; i < numArgs; i++) {
       args.push(String.fromCharCode(36) + i); // $0, $1 etc
     }
-    return Runtime.asmConstCache[code] = eval('(function(' + args.join(',') + '){ ' + Pointer_stringify(code) + ' })'); // new Function does not allow upvars in node
+    return Runtime.asmConstCache[code] = function() { throw new Error('asmConst not supported in CSP'); };
   },
   warnOnce: function (text) {
     if (!Runtime.warnOnce.shown) Runtime.warnOnce.shown = {};
@@ -514,7 +514,8 @@ Module["ccall"] = ccall;
 function getCFunc(ident) {
   try {
     var func = Module['_' + ident]; // closure exported function
-    if (!func) func = eval('_' + ident); // explicit lookup
+    if (!func && typeof window !== 'undefined') func = window['_' + ident];
+    if (!func && typeof globalThis !== 'undefined') func = globalThis['_' + ident];
   } catch(e) {
   }
   assert(func, 'Cannot call unknown function ' + ident + ' (perhaps LLVM optimizations or closure removed it?)');
@@ -8068,6 +8069,12 @@ OCRAD.result_first_character = Module.cwrap('OCRAD_result_first_character', 'num
 return OCRAD;
 })();
 
+if (typeof window !== 'undefined') {
+  window.OCRAD = OCRAD;
+}
+if (typeof globalThis !== 'undefined') {
+  globalThis.OCRAD = OCRAD;
+}
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = OCRAD;
 }

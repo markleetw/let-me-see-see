@@ -295,11 +295,24 @@ test("Suite 8: Google Sheets In-Cell Images & =IMAGE() Formula Extraction", asyn
       "Should extract URL from nested =ARRAYFORMULA(IF(..., IMAGE(...)))"
     );
 
-    // Case 4: Cell reference =IMAGE(A1,4,160,160) with recent resource fallback
+    // Case 4: Cell reference =IMAGE(A1,4,160,160) with URL in referenced cell or DOM
+    const cellA1 = doc.createElement("div");
+    cellA1.textContent = "https://cdn02.pinkoi.com/product/mmqaPyUt/0/160";
+    doc.body.appendChild(cellA1);
+
     formulaBar.textContent = '=IMAGE(A1,4,160,160)';
-    assert.ok(
-      win.__letMeSeeSee.extractFormulaBarImageUrl() !== null || typeof win.__letMeSeeSee.extractFormulaBarImageUrl === "function",
-      "Should handle cell reference =IMAGE(A1,...)"
+    assert.strictEqual(
+      win.__letMeSeeSee.extractFormulaBarImageUrl(),
+      "https://cdn02.pinkoi.com/product/mmqaPyUt/0/160",
+      "Should extract Pinkoi image URL from referenced cell for =IMAGE(A1,4,160,160)"
+    );
+
+    // Case 4b: Nested ARRAYFORMULA with cell reference
+    formulaBar.textContent = '=ARRAYFORMULA(IF(A1="","",IMAGE(A1,4,160,160)))';
+    assert.strictEqual(
+      win.__letMeSeeSee.extractFormulaBarImageUrl(),
+      "https://cdn02.pinkoi.com/product/mmqaPyUt/0/160",
+      "Should extract Pinkoi image URL from referenced cell for =ARRAYFORMULA(IF(..., IMAGE(A1,...)))"
     );
 
     // Case 5: data-sheets-formula attribute
@@ -447,6 +460,38 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     const toast = doc.getElementById("let-me-see-see-toast");
     assert.ok(toast, "Toast notification must be displayed");
     assert.ok(toast.textContent.includes("已成功掃描並複製文字至剪貼簿"), "Toast must confirm successful scan and copy");
+  });
+
+  await t.test("ocrImageToText directly uses window.__letMeSeeSeeActiveRaster when present", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, doc, win } = createMockEnv("https://docs.google.com/spreadsheets/d/123/edit");
+    delete win.TextDetector;
+
+    let writtenText = "";
+    win.navigator.clipboard.writeText = async (txt) => {
+      writtenText = txt;
+    };
+
+    let receivedImageData = null;
+    win.OCRAD = (imgData) => {
+      receivedImageData = imgData;
+      return "2026/04 US$ 81,379 80.30%";
+    };
+
+    win.__letMeSeeSeeActiveRaster = {
+      width: 1024,
+      height: 319,
+      pixels: new Uint8ClampedArray(1024 * 319 * 4)
+    };
+
+    vm.runInNewContext(script, context);
+
+    const ok = await win.__letMeSeeSee.ocrImageToText("data:image/png;base64,...");
+    assert.strictEqual(ok, true, "OCR extraction via active raster must succeed");
+    assert.ok(receivedImageData !== null, "OCRAD must have received ImageData");
+    assert.strictEqual(receivedImageData.width, 1024);
+    assert.strictEqual(receivedImageData.height, 319);
+    assert.strictEqual(writtenText, "2026/04 US$ 81,379 80.30%", "Must copy OCR text to clipboard");
   });
 
   await t.test("ocrImageToText reports failure toast when empty or not found", async () => {

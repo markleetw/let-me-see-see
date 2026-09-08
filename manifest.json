@@ -1,0 +1,48 @@
+{
+   "action": {
+      "default_icon": "assets/icon128.png",
+      "default_popup": "dist/popup/index.html"
+   },
+   "background": {
+      "service_worker": "dist/background/index.mjs"
+   },
+   "content_scripts": [
+      {
+         "js": [
+            "dist/contentScripts/index.global.js"
+         ],
+         "matches": [
+            "https://*.docs.google.com/*"
+         ]
+      }
+   ],
+   "content_security_policy": {
+      "extension_pages": "script-src 'self'; object-src 'self'"
+   },
+   "description": "View, zoom, copy, and download images in Google Docs, Sheets, and Slides.",
+   "icons": {
+      "128": "assets/icon128.png",
+      "16": "assets/icon16.png",
+      "48": "assets/icon48.png"
+   },
+   "manifest_version": 3,
+   "name": "Let Me See See",
+   "options_ui": {
+      "open_in_tab": true,
+      "page": "dist/popup/index.html"
+   },
+   "permissions": [
+      "storage"
+   ],
+   "version": "0.1",
+   "web_accessible_resources": [
+      {
+         "matches": [
+            "https://*.docs.google.com/*"
+         ],
+         "resources": [
+            "dist/contentScripts/style.css"
+         ]
+      }
+   ]
+}

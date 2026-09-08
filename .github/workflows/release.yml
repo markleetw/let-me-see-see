@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify JavaScript Syntax
+        run: npm run check-syntax
+
+      - name: Run Automated Test Suite
+        run: npm test
+
+      - name: Package Extension Zip
+        id: package
+        run: |
+          TAG_NAME=${GITHUB_REF_NAME}
+          ZIP_NAME="let-me-see-see-${TAG_NAME}.zip"
+          zip -r "${ZIP_NAME}" manifest.json assets dist README.md -x "*.DS_Store"
+          echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Let Me See See ${{ github.ref_name }} 👁️🔍
+          files: ${{ steps.package.outputs.zip_name }}
+          generate_release_notes: true
+          body: |
+            ### Let Me See See ${{ github.ref_name }} 👁️🔍
+
+            專為 **Google Docs、Google Sheets、Google Slides** 打造的高解析度原圖放大、複製與下載 Chrome 擴充功能。
+
+            ---
+
+            ### 📦 安裝教學（免商店、開箱即用）
+
+            1. **下載安裝包**：
+               * 點擊下方 Assets 中的 **`${{ steps.package.outputs.zip_name }}`** 下載並解壓縮至任意資料夾。
+            2. **開啟 Chrome 擴充功能管理頁面**：
+               * 在 Chrome 網址列輸入 `chrome://extensions/` 並按 Enter。
+            3. **啟用開發人員模式**：
+               * 將右上角的 **「開發人員模式」** 開關切換為開啟。
+            4. **載入擴充功能**：
+               * 點擊左上角的 **「載入未封裝項目」** 按鈕。
+               * 選擇剛才解壓縮出來的資料夾。
+            5. **開始使用**：
+               * 前往任一份 Google Docs、Google Sheets 或 Google Slides 頁面重新整理（F5）。
+               * 點擊頁面中的任何圖片，右上方即會浮現綠色工具列，即可進行 **View（放大預覽）**、**Copy（原圖複製）** 與 **Download（原圖下載）**！

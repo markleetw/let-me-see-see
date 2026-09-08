@@ -260,15 +260,23 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
   const chromeMock = {
     runtime: {
       id: "let-me-see-see-extension-id",
-      sendMessage: async (msg) => {
-        if (msg.type === "get-location") return "top-right";
-        return null;
+      sendMessage: (msg, ...args) => {
+        const cb = typeof args[args.length - 1] === "function" ? args[args.length - 1] : null;
+        let res = null;
+        if (msg && msg.type === "get-location") res = "top-right";
+        if (cb) cb(res);
+        return Promise.resolve(res);
       },
       onMessage: {
         _listeners: [],
         addListener(fn) { this._listeners.push(fn); }
       },
       getURL: (path) => "chrome-extension://dummy-id/" + path
+    },
+    offscreen: {
+      hasDocument: async () => false,
+      createDocument: async () => {},
+      closeDocument: async () => {}
     },
     storage: {
       local: {

@@ -239,9 +239,9 @@ function cleanOcrText(text) {
     if (!line) continue;
 
     // Filter out pure noise lines (e.g. ". - . _", "_ . _ . . | _ _ _ . . . | |")
-    const alphanum = line.replace(/[^a-zA-Z0-9]/g, "");
-    if (alphanum.length === 0) continue;
-    if (alphanum.length < 3 && /^[\s._\-|/\\~:;+=*^]+$/.test(line.replace(/[a-zA-Z0-9]/g, ""))) {
+    const validChars = line.replace(/[^a-zA-Z0-9\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/g, "");
+    if (validChars.length === 0) continue;
+    if (validChars.length < 3 && /^[\s._\-|/\\~:;+=*^]+$/.test(line.replace(/[a-zA-Z0-9\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/g, ""))) {
       if (line.replace(/[\s._\-|/\\~:;+=*^]/g, "").length <= 1) continue;
     }
 
@@ -307,7 +307,7 @@ async function ocrImageToText(imgUrl) {
     try {
       const res = await window.__letMeSeeSeeOcrEngine(imgUrl);
       if (res && typeof res === "string" && res.trim()) {
-        const text = res.trim();
+        const text = cleanOcrText(res.trim());
         await copyTextToClipboard(text);
         uiToast(`已成功掃描並複製文字至剪貼簿！(${text.length} 字)`);
         return true;
@@ -317,7 +317,48 @@ async function ocrImageToText(imgUrl) {
     }
   }
 
-  // 2. Native Shape Detection API (window.TextDetector)
+  // 2. Prepare image payload (prefer canvas base64 data URL to eliminate CORS friction)
+  let imagePayload = imgUrl;
+  if (window.__letMeSeeSeeActiveRaster && window.__letMeSeeSeeActiveRaster.pixels && window.__letMeSeeSeeActiveRaster.width && window.__letMeSeeSeeActiveRaster.height) {
+    const rasterDataUrl = rasterToDataUrl(window.__letMeSeeSeeActiveRaster);
+    if (rasterDataUrl) imagePayload = rasterDataUrl;
+  } else if (imgUrl.startsWith("http://") || imgUrl.startsWith("https://") || imgUrl.startsWith("blob:")) {
+    try {
+      const bmp = await me(imgUrl);
+      if (bmp) {
+        const cvs = document.createElement("canvas");
+        cvs.width = bmp.width;
+        cvs.height = bmp.height;
+        const ctx = cvs.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(bmp, 0, 0);
+          imagePayload = cvs.toDataURL("image/png");
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Request OCR from Background Service Worker / Offscreen Sandbox (Tesseract WASM)
+  try {
+    if (typeof Rt !== "undefined" && Rt.runtime && typeof Rt.runtime.sendMessage === "function") {
+      const resp = await Rt.runtime.sendMessage({
+        type: "do-ocr",
+        image: imagePayload
+      });
+      if (resp && resp.success && resp.text && resp.text.trim()) {
+        const cleanText = cleanOcrText(resp.text);
+        if (cleanText.length > 0) {
+          await copyTextToClipboard(cleanText);
+          uiToast(`已成功掃描並複製文字至剪貼簿！(${cleanText.length} 字)`);
+          return true;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[Let Me See See] Background OCR messaging error:", err);
+  }
+
+  // 4. Native Shape Detection API (window.TextDetector) fallback
   if (typeof window.TextDetector !== "undefined") {
     try {
       const detector = new window.TextDetector();
@@ -337,8 +378,9 @@ async function ocrImageToText(imgUrl) {
         if (detected && detected.length > 0) {
           const text = detected.map(d => d.rawValue || d.text || "").filter(Boolean).join("\n").trim();
           if (text) {
-            await copyTextToClipboard(text);
-            uiToast(`已成功掃描並複製文字至剪貼簿！(${text.length} 字)`);
+            const cleanText = cleanOcrText(text);
+            await copyTextToClipboard(cleanText);
+            uiToast(`已成功掃描並複製文字至剪貼簿！(${cleanText.length} 字)`);
             return true;
           }
         }
@@ -348,74 +390,21 @@ async function ocrImageToText(imgUrl) {
     }
   }
 
-  // 3. Local In-Browser OCR Engine (ocrad.js, 100% offline, private, in-place)
-  const ocrEngine = typeof OCRAD === "function" ? OCRAD : (typeof window !== "undefined" && typeof window.OCRAD === "function" ? window.OCRAD : (typeof globalThis !== "undefined" && typeof globalThis.OCRAD === "function" ? globalThis.OCRAD : null));
+  // 5. Local in-context OCRAD fallback if available
+  const ocrEngine = typeof OCRAD === "function" ? OCRAD : (typeof window !== "undefined" && typeof window.OCRAD === "function" ? window.OCRAD : null);
   if (ocrEngine) {
     try {
       let imgData = null;
-      if (window.__letMeSeeSeeActiveRaster && window.__letMeSeeSeeActiveRaster.pixels && window.__letMeSeeSeeActiveRaster.width && window.__letMeSeeSeeActiveRaster.height) {
+      if (window.__letMeSeeSeeActiveRaster && window.__letMeSeeSeeActiveRaster.pixels) {
         imgData = {
           width: window.__letMeSeeSeeActiveRaster.width,
           height: window.__letMeSeeSeeActiveRaster.height,
           data: window.__letMeSeeSeeActiveRaster.pixels
         };
       }
-      let bmp = null;
-      let img = null;
-      if (!imgData) {
-        try { bmp = await me(imgUrl); } catch {}
-      }
-      if (bmp) {
-        const cvs = document.createElement("canvas");
-        cvs.width = bmp.width;
-        cvs.height = bmp.height;
-        const ctx = typeof cvs.getContext === "function" ? cvs.getContext("2d", { willReadFrequently: true }) : null;
-        if (ctx) {
-          ctx.drawImage(bmp, 0, 0);
-          imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-        }
-      } else {
-        img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = imgUrl;
-        if (typeof img.decode === "function") {
-          try { await img.decode(); } catch {}
-        }
-        if (img.width && img.height) {
-          const cvs = document.createElement("canvas");
-          cvs.width = img.width;
-          cvs.height = img.height;
-          const ctx = cvs.getContext("2d", { willReadFrequently: true });
-          if (ctx) {
-            ctx.drawImage(img, 0, 0);
-            imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-          }
-        }
-      }
-      if (!imgData) {
-        const w = (bmp && bmp.width) || (img && (img.naturalWidth || img.width)) || 100;
-        const h = (bmp && bmp.height) || (img && (img.naturalHeight || img.height)) || 100;
-        const cvs = document.createElement("canvas");
-        cvs.width = w;
-        cvs.height = h;
-        const ctx = cvs.getContext("2d", { willReadFrequently: true });
-        if (ctx) {
-          if (bmp) {
-            try { ctx.drawImage(bmp, 0, 0); } catch {}
-          } else if (img && img.src) {
-            try { ctx.drawImage(img, 0, 0); } catch {}
-          }
-          try {
-            imgData = ctx.getImageData(0, 0, w, h);
-          } catch {}
-        }
-        if (!imgData) {
-          imgData = { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) };
-        }
-      }
       if (imgData) {
         const result = ocrEngine(imgData);
-        if (result && typeof result === "string" && result.trim().length > 0) {
+        if (result && typeof result === "string" && result.trim()) {
           const cleanText = cleanOcrText(result);
           if (cleanText.length > 0) {
             await copyTextToClipboard(cleanText);
@@ -424,12 +413,10 @@ async function ocrImageToText(imgUrl) {
           }
         }
       }
-    } catch (err) {
-      console.warn("[Let Me See See] Local OCR error:", err);
-    }
+    } catch {}
   }
 
-  // 4. Fallback: check DOM metadata associated with this image
+  // 6. Metadata fallback: check DOM metadata associated with this image
   try {
     const candidates = Array.from(document.querySelectorAll("img, svg image, [data-sheets-formula]"));
     for (const el of candidates) {
@@ -437,22 +424,24 @@ async function ocrImageToText(imgUrl) {
       if (src && (src === imgUrl || imgUrl.includes(src) || src.includes(imgUrl))) {
         const text = el.getAttribute("alt") || el.getAttribute("aria-label") || el.getAttribute("title");
         if (text && text.trim() && !text.startsWith("http")) {
-          await copyTextToClipboard(text.trim());
-          uiToast(`已成功掃描並複製文字至剪貼簿！(${text.trim().length} 字)`);
+          const cleanText = cleanOcrText(text.trim());
+          await copyTextToClipboard(cleanText);
+          uiToast(`已成功掃描並複製文字至剪貼簿！(${cleanText.length} 字)`);
           return true;
         }
       }
     }
   } catch {}
 
-  // 5. Fallback: check formula bar if spreadsheet
+  // 7. Fallback: check formula bar if spreadsheet
   const formulaUrl = typeof extractFormulaBarImageUrl === "function" ? extractFormulaBarImageUrl() : null;
   if (formulaUrl && (formulaUrl === imgUrl || imgUrl.includes(formulaUrl))) {
     const formulaBar = document.querySelector("#t-formula-bar-input, .cell-input");
     const rawVal = formulaBar ? (formulaBar.textContent || formulaBar.value || "") : "";
     if (rawVal) {
-      await copyTextToClipboard(rawVal.trim());
-      uiToast(`已成功掃描並複製文字至剪貼簿！(${rawVal.trim().length} 字)`);
+      const cleanText = cleanOcrText(rawVal.trim());
+      await copyTextToClipboard(cleanText);
+      uiToast(`已成功掃描並複製文字至剪貼簿！(${cleanText.length} 字)`);
       return true;
     }
   }

@@ -173,6 +173,11 @@ test("Suite 6: Background Service Worker Initialization", (t) => {
         addListener(fn) { this._listeners.push(fn); }
       }
     },
+    offscreen: {
+      hasDocument: async () => false,
+      createDocument: async () => {},
+      closeDocument: async () => {}
+    },
     storage: {
       local: {
         get: async () => ({}),
@@ -422,15 +427,27 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     assert.strictEqual(writtenText, "季度策略發展規劃圖", "Alt text must be written to clipboard");
   });
 
-  await t.test("ocrImageToText recognizes text using local in-browser OCR engine and copies to clipboard without opening tabs", async () => {
+  await t.test("ocrImageToText sends do-ocr message to background/offscreen and copies Chinese text to clipboard", async () => {
     const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
-    const { context, doc, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    const { context, doc, win, chromeMock } = createMockEnv("https://docs.google.com/document/d/123/edit");
     delete win.TextDetector;
 
+    let receivedMsg = null;
     let openedTabs = 0;
-    win.open = () => {
-      openedTabs++;
-      return {};
+    win.open = () => { openedTabs++; return {}; };
+
+    chromeMock.runtime.sendMessage = (msg, ...args) => {
+      receivedMsg = msg;
+      const cb = typeof args[args.length - 1] === "function" ? args[args.length - 1] : null;
+      let res = null;
+      if (msg.type === "do-ocr") {
+        res = {
+          success: true,
+          text: "資料源總表\n卡片標題\n首頁\n範例\n累積命中\nmatcha-tw 5.4%"
+        };
+      }
+      if (cb) cb(res);
+      return Promise.resolve(res);
     };
 
     let writtenText = "";
@@ -438,19 +455,47 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
       writtenText = txt;
     };
 
-    // Provide mock local OCR engine (OCRAD)
-    win.OCRAD = () => "SCANNED_RECEIPT_TOTAL_100";
-
     vm.runInNewContext(script, context);
 
-    const ok = await win.__letMeSeeSee.ocrImageToText("https://example.com/receipt-photo.png");
-    assert.strictEqual(ok, true, "Local OCR extraction should succeed and return true");
-    assert.strictEqual(writtenText, "SCANNED_RECEIPT_TOTAL_100", "Recognized text must be copied to clipboard");
+    const ok = await win.__letMeSeeSee.ocrImageToText("https://example.com/chinese-table.png");
+    assert.strictEqual(ok, true, "OCR extraction via background offscreen should succeed");
+    assert.strictEqual(receivedMsg.type, "do-ocr", "Message type must be 'do-ocr'");
+    assert.ok(writtenText.includes("資料源總表"), "Extracted text must contain Traditional Chinese title");
+    assert.ok(writtenText.includes("卡片標題"), "Extracted text must contain card title");
+    assert.ok(writtenText.includes("matcha-tw 5.4%"), "Extracted text must contain English and numbers");
     assert.strictEqual(openedTabs, 0, "OCR must NEVER open any external tabs or Google Lens");
 
     const toast = doc.getElementById("let-me-see-see-toast");
     assert.ok(toast, "Toast notification must be displayed");
-    assert.ok(toast.textContent.includes("已成功掃描並複製文字至剪貼簿"), "Toast must confirm successful scan and copy");
+    assert.ok(toast.textContent.includes("已成功掃描並複製文字至剪貼簿"), "Toast must confirm successful copy");
+  });
+
+  await t.test("offscreen.js registers runtime message listener for do-ocr and invokes worker", async () => {
+    const offscreenScript = fs.readFileSync("dist/offscreen/offscreen.js", "utf8");
+    const { context, chromeMock } = createMockEnv("chrome-extension://dummy-id/dist/offscreen/offscreen.html");
+
+    let recognizeCalledWith = null;
+    context.Tesseract = {
+      createWorker: async () => ({
+        recognize: async (img) => {
+          recognizeCalledWith = img;
+          return { data: { text: "離線 Tesseract 辨識結果：資料源總表" } };
+        }
+      })
+    };
+
+    vm.runInNewContext(offscreenScript, context);
+
+    assert.ok(chromeMock.runtime.onMessage._listeners.length > 0, "Offscreen script must register onMessage listener");
+    const listener = chromeMock.runtime.onMessage._listeners[0];
+
+    const response = await new Promise((resolve) => {
+      listener({ target: "offscreen", type: "do-ocr", image: "data:image/png;base64,mock" }, {}, resolve);
+    });
+
+    assert.strictEqual(response.success, true, "Offscreen OCR response must report success");
+    assert.strictEqual(response.text, "離線 Tesseract 辨識結果：資料源總表");
+    assert.strictEqual(recognizeCalledWith, "data:image/png;base64,mock");
   });
 
   await t.test("ocrImageToText directly uses window.__letMeSeeSeeActiveRaster when present", async () => {
@@ -516,6 +561,20 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     assert.ok(cleaned.includes("2026/06 US$ 90,409 US$ 68,924 76.24% -57,326"), "Line 3 must be cleanly repaired");
     assert.ok(cleaned.includes("2026/07 US$ 91,638 US$ 69,397 75.73% -79,566"), "Line 4 must be cleanly repaired");
     assert.ok(cleaned.includes("2026/08 US$ 94,505 US$ 62,659 66.30% -111,412"), "Line 5 must be cleanly repaired");
+  });
+
+  await t.test("cleanOcrText preserves Chinese characters while stripping noise lines", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    const input = ". - . _\n資料源總表\n_ . _ . . | _ _ _ . . . | |\n卡片標題\n首頁 「主題企劃」 5.4%";
+    const cleaned = win.__letMeSeeSee.cleanOcrText(input);
+    assert.ok(!cleaned.includes(". - . _"), "Noise line 1 must be removed");
+    assert.ok(!cleaned.includes("_ . _ . ."), "Noise line 2 must be removed");
+    assert.ok(cleaned.includes("資料源總表"), "Chinese header must be preserved");
+    assert.ok(cleaned.includes("卡片標題"), "Chinese cell text must be preserved");
+    assert.ok(cleaned.includes("首頁 「主題企劃」 5.4%"), "Chinese and percentage must be preserved");
   });
 });
 

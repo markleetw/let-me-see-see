@@ -9,7 +9,6 @@
    "content_scripts": [
       {
          "js": [
-            "dist/contentScripts/ocrad.js",
             "dist/contentScripts/index.global.js"
          ],
          "matches": [
@@ -18,7 +17,7 @@
       }
    ],
    "content_security_policy": {
-      "extension_pages": "script-src 'self'; object-src 'self'"
+      "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
    },
    "description": "View, zoom, copy, and download images in Google Docs, Sheets, and Slides.",
    "icons": {
@@ -33,7 +32,8 @@
       "page": "dist/popup/index.html"
    },
    "permissions": [
-      "storage"
+      "storage",
+      "offscreen"
    ],
    "version": "0.1",
    "web_accessible_resources": [
@@ -42,7 +42,10 @@
             "https://*.docs.google.com/*"
          ],
          "resources": [
-            "dist/contentScripts/style.css"
+            "dist/contentScripts/style.css",
+            "dist/assets/tesseract/*",
+            "dist/assets/tesseract/lang/*",
+            "dist/offscreen/*"
          ]
       }
    ]

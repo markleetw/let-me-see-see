@@ -219,6 +219,80 @@ async function copyTextToClipboard(text) {
 }
 
 /**
+ * Clean and normalize raw OCR output:
+ * - Remove symbol noise lines (. - . _, pipes, underscores)
+ * - Correct common OCR character confusions in business tables, dates, numbers and currency:
+ *   - usS / uss -> US$
+ *   - 202b / 2D2b -> 2026
+ *   - 2026108 -> 2026/08
+ *   - pipes | and I inside numbers -> 1
+ *   - 'b' inside numbers / percentages -> 6
+ *   - 'o' inside numbers -> 0
+ */
+function cleanOcrText(text) {
+  if (!text) return "";
+  const lines = text.split("\n");
+  const cleaned = [];
+
+  for (let rawLine of lines) {
+    let line = rawLine.trim();
+    if (!line) continue;
+
+    // Filter out pure noise lines (e.g. ". - . _", "_ . _ . . | _ _ _ . . . | |")
+    const alphanum = line.replace(/[^a-zA-Z0-9]/g, "");
+    if (alphanum.length === 0) continue;
+    if (alphanum.length < 3 && /^[\s._\-|/\\~:;+=*^]+$/.test(line.replace(/[a-zA-Z0-9]/g, ""))) {
+      if (line.replace(/[\s._\-|/\\~:;+=*^]/g, "").length <= 1) continue;
+    }
+
+    // Normalize Currency: usS, USS, us$, etc. -> US$
+    line = line.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
+    line = line.replace(/\busS\s*/g, "US$ ");
+
+    // Normalize Years & Dates: 202b/ -> 2026/, 2D2b/ -> 2026/, 2026108 -> 2026/08
+    line = line.replace(/\b2[D0O]2[bB6]\/([0-1]\d)\b/g, "2026/$1");
+    line = line.replace(/\b(20[12])[bB]\/([0-1]\d)\b/g, "$16/$2");
+    line = line.replace(/\b(20\d\d)[1l|I/]([0-1]\d)\b/g, "$1/$2");
+
+    // Normalize Numbers & Financial amounts:
+    // Replace pipes | and uppercase I / lowercase l inside numbers with 1
+    line = line.replace(/(\d)[|Il](\d)/g, "$11$2");
+    line = line.replace(/(\d)[|Il],/g, "$11,");
+    line = line.replace(/,[|Il](\d)/g, ",1$1");
+    line = line.replace(/\b[|Il](\d)/g, "1$1");
+    line = line.replace(/(\d)[|Il]\b/g, "$11");
+    line = line.replace(/-\s*[|Il]\s*/g, "-1");
+
+    // Replace 'b' / 'B' inside numbers/amounts with 6
+    line = line.replace(/(\d)[bB](\d)/g, "$16$2");
+    line = line.replace(/(\d)[bB],/g, "$16,");
+    line = line.replace(/,[bB](\d)/g, ",6$1");
+    line = line.replace(/\b[bB](\d)/g, "6$1");
+    line = line.replace(/(\d)[bB]\b/g, "$16");
+    line = line.replace(/(\d)[bB]\./g, "$16.");
+    line = line.replace(/\.([bB])(\d)/g, ".6$2");
+    line = line.replace(/(\d)[bB]%/g, "$16%");
+    line = line.replace(/([0-9,])[bB]+(\b|\s)/g, (m, p1, p2) => p1 + "6".repeat(m.length - p1.length - p2.length) + p2);
+
+    // Replace 'o' / 'O' inside numbers/amounts with 0
+    line = line.replace(/(\d)[oO](\d)/g, "$10$2");
+    line = line.replace(/,[oO](\d)/g, ",0$1");
+    line = line.replace(/(\d)[oO],/g, "$10,");
+    line = line.replace(/(\d)[oO]%/g, "$10%");
+
+    // Replace standalone pipes inside numbers: e.g. -1||,4|2 -> -111,412
+    line = line.replace(/\|/g, "1");
+
+    // Clean stray negative spaces: e.g. "-1 b,o34" -> "-16,034"
+    line = line.replace(/-(\d+)\s+([0-9bBoO]+),/g, "-$1$2,");
+
+    cleaned.push(line);
+  }
+
+  return cleaned.join("\n").trim();
+}
+
+/**
  * On-demand OCR Image-to-Text extraction
  */
 async function ocrImageToText(imgUrl) {
@@ -342,10 +416,12 @@ async function ocrImageToText(imgUrl) {
       if (imgData) {
         const result = ocrEngine(imgData);
         if (result && typeof result === "string" && result.trim().length > 0) {
-          const cleanText = result.trim();
-          await copyTextToClipboard(cleanText);
-          uiToast(`已成功掃描並複製文字至剪貼簿！(${cleanText.length} 字)`);
-          return true;
+          const cleanText = cleanOcrText(result);
+          if (cleanText.length > 0) {
+            await copyTextToClipboard(cleanText);
+            uiToast(`已成功掃描並複製文字至剪貼簿！(${cleanText.length} 字)`);
+            return true;
+          }
         }
       }
     } catch (err) {
@@ -643,59 +719,10 @@ const Ws = ".waffle-borderless-embedded-object-container img:not([flow-btn])";
 let Pi = false, Fi = 0;
 
 /**
- * Initialize Google Sheets module
+ * Initialize Google Sheets module (Floating / Over-cells images)
  */
 function Hs() {
   bn(Ws).every(n => (Te(), Vs(n), true));
-  if (!Pi) {
-    document.addEventListener("click", Zs, true);
-    Pi = true;
-  }
-}
-
-async function Zs(n) {
-  const e = n.target;
-  if (!(e instanceof Element)) return;
-  if (e.closest(".waffle-borderless-embedded-object-container")) return;
-  const isGrid = e.tagName === "CANVAS" || !!e.closest(".grid-container, .grid4-inner-container, .grid-scrollable-wrapper, #waffle-grid-container, .waffle-container, [id*='grid'], [role='grid'], [role='gridcell'], .cell-selection-handle, .active-cell-border");
-  if (!isGrid) return;
-  const t = ++Fi;
-
-  const directImg = e.tagName === "IMG" ? e : (typeof e.querySelector === "function" ? e.querySelector("img") : null);
-  if (directImg && (directImg.src || directImg.getAttribute("src"))) {
-    const src = directImg.src || directImg.getAttribute("src");
-    Os(src);
-    Rs(typeof directImg.getBoundingClientRect === "function" ? directImg.getBoundingClientRect() : e.getBoundingClientRect());
-    return;
-  }
-
-  let i = await hr(n.clientX, n.clientY);
-  const selRect = (typeof getActiveCellSelectionRect === "function" && getActiveCellSelectionRect()) || (typeof e.getBoundingClientRect === "function" ? e.getBoundingClientRect() : new DOMRect(0, 0, 100, 30));
-  if (!i) {
-    const formulaUrl = extractFormulaBarImageUrl();
-    if (formulaUrl) {
-      i = { url: formulaUrl, rect: selRect };
-    }
-  }
-
-  if (t === Fi) {
-    if (!i) {
-      setTimeout(() => {
-        if (t !== Fi) return;
-        const delayedFormulaUrl = extractFormulaBarImageUrl();
-        const delayedSelRect = (typeof getActiveCellSelectionRect === "function" && getActiveCellSelectionRect()) || selRect;
-        if (delayedFormulaUrl) {
-          Os(delayedFormulaUrl);
-          Rs(delayedSelRect);
-        } else {
-          Ms();
-        }
-      }, 100);
-      return;
-    }
-    Os(i.url);
-    Rs(i.rect);
-  }
 }
 
 function Vs(n) {
@@ -758,7 +785,7 @@ function Vs(n) {
       batchDownloadAllImages,
       Cs,
       extractFormulaBarImageUrl,
-      Zs,
+      cleanOcrText,
       Ir,
       Wr,
       sn,

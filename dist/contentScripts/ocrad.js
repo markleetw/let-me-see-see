@@ -8031,6 +8031,7 @@ var OCRAD = function(image){
   var desc = OCRAD.open();
   OCRAD.set_image_from_file(desc, 'in.pnm', 0);
   OCRAD.set_utf8_format(desc, 1);
+  OCRAD.scale(desc, 2);
   OCRAD.recognize(desc, 0)
   var text = '';
   var block_count = OCRAD.result_blocks(desc);
@@ -8039,7 +8040,7 @@ var OCRAD = function(image){
     var line_count = OCRAD.result_lines(desc, i);
     for(var j = 0; j < line_count; j++){
       var line = OCRAD.result_line(desc, i, j);
-      text += line;
+      text += line + '\n';
     }
   }
   OCRAD.close(desc)

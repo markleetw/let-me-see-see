@@ -44,11 +44,10 @@ test("Suite 1: Content Script Initialization & Document Type Routing", async (t)
   });
 
   await t.test("Google Sheets: routes to spreadsheets handler", async () => {
-    const { context, listeners, chromeMock } = createMockEnv("https://docs.google.com/spreadsheets/d/1BxiMVs0/edit");
+    const { context, chromeMock } = createMockEnv("https://docs.google.com/spreadsheets/d/1BxiMVs0/edit");
     assert.doesNotThrow(() => {
       vm.runInNewContext(contentScriptCode, context);
     });
-    assert.ok(listeners.doc.click && listeners.doc.click.length > 0, "Spreadsheets click listener must be mounted");
     const docTypeListener = chromeMock.runtime.onMessage._listeners[0];
     const reply = await new Promise(resolve => docTypeListener({ type: "get-document-type" }, {}, resolve));
     assert.strictEqual(reply, "spreadsheets", "Must report document type as 'spreadsheets'");
@@ -350,32 +349,24 @@ test("Suite 8: Google Sheets In-Cell Images & =IMAGE() Formula Extraction", asyn
     assert.ok(urls.some(u => u.includes("sheets-images-rt")), "Ir must include standard sheets-images-rt URLs");
   });
 
-  await t.test("Zs click handler responds to in-cell image element and aligns toolbar", async () => {
+  await t.test("Google Sheets: only floating images mount toolbar; in-cell clicks do not trigger false positive toolbar", async () => {
     const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
     const { context, doc, win } = createMockEnv("https://docs.google.com/spreadsheets/d/123/edit");
     vm.runInNewContext(script, context);
 
-    const gridContainer = doc.createElement("div");
-    gridContainer.className = "grid4-inner-container";
-    doc.body.appendChild(gridContainer);
+    // Simulate clicking an ordinary cell or empty space
+    const normalCell = doc.createElement("div");
+    normalCell.className = "grid-cell";
+    normalCell.textContent = "Normal Text";
+    doc.body.appendChild(normalCell);
 
-    const cell = doc.createElement("div");
-    cell.className = "grid-cell";
-    const cellImg = doc.createElement("img");
-    cellImg.src = "https://example.com/in-cell-photo.png";
-    cell.appendChild(cellImg);
-    gridContainer.appendChild(cell);
-
-    // Call Zs with target inside grid4-inner-container
-    await win.__letMeSeeSee.Zs({
-      target: cellImg,
-      clientX: 50,
-      clientY: 60
-    });
-
+    normalCell.dispatchEvent({ target: normalCell, type: "click", clientX: 100, clientY: 100 });
     const toolbar = doc.getElementById("letMeSeeSeeToolbar");
-    assert.ok(toolbar, "Toolbar should exist");
-    assert.notStrictEqual(toolbar.style.getPropertyValue("display"), "none", "Toolbar should be shown on cell click");
+    // Toolbar should either not exist or not be displayed
+    assert.ok(!toolbar || toolbar.style.getPropertyValue("display") === "none", "Normal cells must not show toolbar");
+
+    // Hs initializes floating images support
+    assert.ok(typeof win.__letMeSeeSee.Hs === "function", "Hs must be defined");
   });
 });
 
@@ -507,6 +498,24 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     const toast = doc.getElementById("let-me-see-see-toast");
     assert.ok(toast, "Toast must be displayed on failure");
     assert.ok(toast.textContent.includes("未指定圖片"), "Toast must display warning message");
+  });
+
+  await t.test("cleanOcrText cleans noise lines, repairs currency, years, and digit glyphs", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    const dirtyRaw = `. - . _\n_ . _ . . | _ _ _ . . . | |\n202b/04 usS 8|,379 usS b5,345 80.30% -| b,o34\n202b/05 usS 90,977 usS 7|,I7| 78.23% -35,84|\n202b/0b usS 90,409 usS b8,924 7b.24% -57,32b\n202b/07 usS 9|,b38 usS b9,397 75.73% -79,5bb\n2026108 usS 94,505 usS 62,659 66.30% -1||,4|2`;
+
+    const cleaned = win.__letMeSeeSee.cleanOcrText(dirtyRaw);
+    assert.ok(typeof cleaned === "string", "cleanOcrText must return string");
+    assert.ok(!cleaned.includes(". - . _"), "Pure symbol noise must be removed");
+    assert.ok(!cleaned.includes("_ . _ . ."), "Line noise must be removed");
+    assert.ok(cleaned.includes("2026/04 US$ 81,379 US$ 65,345 80.30% -16,034"), "Line 1 must be cleanly repaired");
+    assert.ok(cleaned.includes("2026/05 US$ 90,977 US$ 71,171 78.23% -35,841"), "Line 2 must be cleanly repaired");
+    assert.ok(cleaned.includes("2026/06 US$ 90,409 US$ 68,924 76.24% -57,326"), "Line 3 must be cleanly repaired");
+    assert.ok(cleaned.includes("2026/07 US$ 91,638 US$ 69,397 75.73% -79,566"), "Line 4 must be cleanly repaired");
+    assert.ok(cleaned.includes("2026/08 US$ 94,505 US$ 62,659 66.30% -111,412"), "Line 5 must be cleanly repaired");
   });
 });
 

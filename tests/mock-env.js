@@ -61,6 +61,29 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
       for (const el of els) this.appendChild(el);
     }
     getBoundingClientRect() { return { left: 10, top: 20, right: 110, bottom: 120, width: 100, height: 100 }; }
+    getContext(type) {
+      if (this.tagName === "CANVAS") {
+        return {
+          canvas: this,
+          drawImage: () => {},
+          getImageData: (x, y, w, h) => ({
+            width: w || this.width || 100,
+            height: h || this.height || 100,
+            data: new Uint8ClampedArray((w || 100) * (h || 100) * 4)
+          }),
+          createImageData: (w, h) => ({
+            width: w,
+            height: h,
+            data: new Uint8ClampedArray(w * h * 4)
+          }),
+          putImageData: () => {}
+        };
+      }
+      return null;
+    }
+    toDataURL() {
+      return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    }
     matches(sel) { return matchesSelector(this, sel); }
     closest(sel) {
       let cur = this;

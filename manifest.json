@@ -9,6 +9,7 @@
    "content_scripts": [
       {
          "js": [
+            "dist/contentScripts/ocrad.js",
             "dist/contentScripts/index.global.js"
          ],
          "matches": [

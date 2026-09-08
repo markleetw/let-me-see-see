@@ -4,7 +4,7 @@
   "description": "View, zoom, copy, and download images in Google Docs, Sheets, and Slides.",
   "scripts": {
     "test": "node --test tests/extension.test.js",
-    "check-syntax": "node -c dist/contentScripts/index.global.js && node -c dist/background/index.mjs",
+    "check-syntax": "node -c dist/contentScripts/index.global.js && node -c dist/contentScripts/ocrad.js && node -c dist/background/index.mjs",
     "build:zip": "zip -r let-me-see-see-v0.1.zip manifest.json assets dist README.md -x '*.DS_Store'"
   },
   "keywords": [

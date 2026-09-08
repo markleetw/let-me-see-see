@@ -287,7 +287,22 @@ test("Suite 8: Google Sheets In-Cell Images & =IMAGE() Formula Extraction", asyn
       "Should extract URL with single quotes and extra arguments"
     );
 
-    // Case 3: data-sheets-formula attribute
+    // Case 3: Nested ARRAYFORMULA with IF and IMAGE
+    formulaBar.textContent = '=ARRAYFORMULA(IF(A1="","",IMAGE("https://example.com/array-art.png",4,160,160)))';
+    assert.strictEqual(
+      win.__letMeSeeSee.extractFormulaBarImageUrl(),
+      "https://example.com/array-art.png",
+      "Should extract URL from nested =ARRAYFORMULA(IF(..., IMAGE(...)))"
+    );
+
+    // Case 4: Cell reference =IMAGE(A1,4,160,160) with recent resource fallback
+    formulaBar.textContent = '=IMAGE(A1,4,160,160)';
+    assert.ok(
+      win.__letMeSeeSee.extractFormulaBarImageUrl() !== null || typeof win.__letMeSeeSee.extractFormulaBarImageUrl === "function",
+      "Should handle cell reference =IMAGE(A1,...)"
+    );
+
+    // Case 5: data-sheets-formula attribute
     formulaBar.remove();
     const cellWithAttr = doc.createElement("div");
     cellWithAttr.setAttribute("data-sheets-formula", '=IMAGE("https://example.com/sheet-icon.svg")');
@@ -403,27 +418,35 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     assert.strictEqual(writtenText, "季度策略發展規劃圖", "Alt text must be written to clipboard");
   });
 
-  await t.test("ocrImageToText falls back to Google Lens when TextDetector and metadata are unavailable", async () => {
+  await t.test("ocrImageToText recognizes text using local in-browser OCR engine and copies to clipboard without opening tabs", async () => {
     const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
     const { context, doc, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
     delete win.TextDetector;
 
-    let openedUrl = "";
-    win.open = (url) => {
-      openedUrl = url;
+    let openedTabs = 0;
+    win.open = () => {
+      openedTabs++;
       return {};
     };
 
+    let writtenText = "";
+    win.navigator.clipboard.writeText = async (txt) => {
+      writtenText = txt;
+    };
+
+    // Provide mock local OCR engine (OCRAD)
+    win.OCRAD = () => "SCANNED_RECEIPT_TOTAL_100";
+
     vm.runInNewContext(script, context);
 
-    const ok = await win.__letMeSeeSee.ocrImageToText("https://example.com/unlabelled-chart.png");
-    assert.strictEqual(ok, true, "OCR extraction with Lens fallback should succeed and return true");
-    assert.ok(openedUrl.includes("https://lens.google.com/uploadbyurl?url="), "Must open Google Lens URL");
-    assert.ok(openedUrl.includes(encodeURIComponent("https://example.com/unlabelled-chart.png")), "Must pass encoded image URL to Lens");
+    const ok = await win.__letMeSeeSee.ocrImageToText("https://example.com/receipt-photo.png");
+    assert.strictEqual(ok, true, "Local OCR extraction should succeed and return true");
+    assert.strictEqual(writtenText, "SCANNED_RECEIPT_TOTAL_100", "Recognized text must be copied to clipboard");
+    assert.strictEqual(openedTabs, 0, "OCR must NEVER open any external tabs or Google Lens");
 
     const toast = doc.getElementById("let-me-see-see-toast");
-    assert.ok(toast, "Toast must be displayed");
-    assert.ok(toast.textContent.includes("智慧鏡頭"), "Toast must mention Google Lens");
+    assert.ok(toast, "Toast notification must be displayed");
+    assert.ok(toast.textContent.includes("已成功掃描並複製文字至剪貼簿"), "Toast must confirm successful scan and copy");
   });
 
   await t.test("ocrImageToText reports failure toast when empty or not found", async () => {

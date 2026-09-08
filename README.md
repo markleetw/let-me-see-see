@@ -13,13 +13,16 @@
 * 🔍 **View（放大預覽）**：點擊圖片即在選取框角落吸附專屬浮動工具列，開啟高解析燈箱（Viewer.js），支援 1:1 縮放、自由旋轉與平移。
 * 📋 **Copy（原圖複製）**：一鍵呼叫 Clipboard API 將高解析原圖二進位 PNG 寫入剪貼簿，直接在其他修圖或通訊軟體中貼上。
 * 💾 **Download（原圖下載）**：直接自 Google CDN 擷取原圖二進位 Blob（自動升級獲取高解析度如 `=s2048`），**完整保留中文與 Unicode 文檔標題**作為檔名。
+* 📦 **Batch Export（一鍵全文件圖片打包下載 ZIP）**：按需手動觸發！一鍵掃描全份文件內所有高解析圖片並即時打包為 ZIP 下載，在浮動工具列與擴充功能 Popup 面板均可操作，附帶下載進度通知。
+* 📊 **Google Sheets 儲存格內圖片與 `=IMAGE()` 反解**：不論是懸浮於儲存格上方的圖片、儲存格內嵌圖片，或是以 `=IMAGE("...")` 公式載入的網路圖片，點擊儲存格即時反解並吸附工具列。
+* 🔤 **OCR 圖片一鍵文字辨識複製 (Image-to-Text)**：工具列專屬 OCR 按鈕，點擊即可萃取圖片中的文字內容並自動寫入剪貼簿，完美支援快速提取投影片圖表文字或試算表圖片文字。
 * 🧩 **Canvas 瓦片反解與自動縫合**：針對 Google Docs 採用多塊 HTML5 Canvas（`kix-canvas-tile-content`）虛擬化渲染且無常規 `<img>` 標籤的架構，透過離屏像素掃描、跨瓦片邊界檢測與垂直拼合演算法，精準反解圖片。
 * ⚡ **極致效能優化**：
   * **LRU 圖片快取（上限 30 張）**：動態維護最近使用的圖片快取，淘汰時顯式調用 `bitmap.close()` 立即釋放 GPU VRAM，杜絕記憶體洩漏。
   * **RAF 影格節流（VSync 同步）**：全域 `scroll` 與 `resize` 監聽經由 `requestAnimationFrame` 節流，無圖片選取時 0ms 短路返回，徹底根絕 Layout Thrashing。
   * **空白點擊防抖**：具備邊界預先過濾與 8 秒冷卻防抖，杜絕點擊空白處引發整份文件重掃與卡死。
   * **並行並發池（Worker Pool = 4）**：原圖批次拉取時限制最大並發數為 4，避免暴擊 CPU 與網路頻寬。
-* 💬 **友善 UI 回饋**：若因網頁未聚焦或權限阻擋導致剪貼簿寫入失敗，即時於畫面中央浮現 Toast 提示與按鈕視覺警告反饋。
+* 💬 **友善 UI 回饋**：操作成功或失敗時，即時浮現繁體中文 Toast 提示與按鈕視覺狀態反饋。
 
 ---
 
@@ -84,9 +87,12 @@ npm test
 | `Ln(n, e)` | 圖像發現總調度器 | 統一調用 `Ur` (Docs)、`jr` (Sheets)、`Wr` (Slides) |
 | `Ur()` / `Mr()` | Canvas 瓦片遍歷與切片比對 | **核心演算法**，負責像素分析與跨瓦片縫合 |
 | `Or(n)` | 網路圖片批次抓取 | 封裝並行池（Worker Pool = 4）生成 48x48 縮圖 |
-| `sn(n)` | 浮動工具列動作分發 | 處理 `zoom`、`copy`、`download` 點擊指令 |
+| `sn(n)` | 浮動工具列動作分發 | 處理 `zoom`、`copy`、`download`、`ocr` 點擊指令 |
 | `vi(n)` | 圖片複製至剪貼簿 | Clipboard API 寫入，包含失敗 Toast 與按鈕警告反饋 |
 | `bi(n, e)` | 單圖下載觸發器 | 建立 Blob 物件觸發瀏覽器下載 |
+| `batchDownloadAllImages()` | 全文件圖片打包下載 | 掃描全文件並以 JSZip 打包為 ZIP 下載 |
+| `extractFormulaBarImageUrl()` | Google Sheets 公式反解 | 從編輯列或儲存格屬性萃取 `=IMAGE()` 圖片 URL |
+| `ocrImageToText(url)` | 圖片文字辨識複製 | 透過 TextDetector API 或元數據萃取文字寫入剪貼簿 |
 | `Qe(n)` | 檔名正規化處理 | 支援 Unicode 屬性轉義 `\p{L}\p{N}`，完整保留中文檔名 |
 
 ---

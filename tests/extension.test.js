@@ -84,8 +84,7 @@ test("Suite 2: Floating Toolbar & Action Button Construction", (t) => {
   assert.strictEqual(downloadBtn.getAttribute("aria-label"), "Download image");
 
   const batchBtn = doc.getElementById("BatchDownloadIconBtn");
-  assert.ok(batchBtn, "Batch download button (BatchDownloadIconBtn) must be rendered");
-  assert.strictEqual(batchBtn.getAttribute("aria-label"), "打包下載全文件圖片 (ZIP)");
+  assert.strictEqual(batchBtn, null, "Batch download button (BatchDownloadIconBtn) should NOT be in floating toolbar (only in popup)");
 });
 
 test("Suite 3: Chinese & Unicode Document Title and Download Filename Sanitization", (t) => {
@@ -402,6 +401,29 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     const ok = await win.__letMeSeeSee.ocrImageToText("https://example.com/quarterly-plan.png");
     assert.strictEqual(ok, true, "OCR extraction via metadata fallback should succeed");
     assert.strictEqual(writtenText, "季度策略發展規劃圖", "Alt text must be written to clipboard");
+  });
+
+  await t.test("ocrImageToText falls back to Google Lens when TextDetector and metadata are unavailable", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, doc, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    delete win.TextDetector;
+
+    let openedUrl = "";
+    win.open = (url) => {
+      openedUrl = url;
+      return {};
+    };
+
+    vm.runInNewContext(script, context);
+
+    const ok = await win.__letMeSeeSee.ocrImageToText("https://example.com/unlabelled-chart.png");
+    assert.strictEqual(ok, true, "OCR extraction with Lens fallback should succeed and return true");
+    assert.ok(openedUrl.includes("https://lens.google.com/uploadbyurl?url="), "Must open Google Lens URL");
+    assert.ok(openedUrl.includes(encodeURIComponent("https://example.com/unlabelled-chart.png")), "Must pass encoded image URL to Lens");
+
+    const toast = doc.getElementById("let-me-see-see-toast");
+    assert.ok(toast, "Toast must be displayed");
+    assert.ok(toast.textContent.includes("智慧鏡頭"), "Toast must mention Google Lens");
   });
 
   await t.test("ocrImageToText reports failure toast when empty or not found", async () => {

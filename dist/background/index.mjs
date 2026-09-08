@@ -19,8 +19,8 @@ async function ensureOffscreenDocument() {
 
   creatingOffscreenPromise = chrome.offscreen.createDocument({
     url: offscreenUrl,
-    reasons: ["DOM_PARSER", "WORKERS"],
-    justification: "Local Tesseract OCR processing with WebAssembly"
+    reasons: ["DOM_PARSER", "WORKERS", "CLIPBOARD"],
+    justification: "Local Tesseract OCR processing and clipboard handling with WebAssembly"
   });
 
   try {
@@ -38,6 +38,28 @@ async function O(){const{widgetLocation:l}=await w.storage.local.get("widgetLoca
 w.runtime.onMessage.addListener(async l=>{
   if(l.widgetLocation&&l.type==="update-location")return w.storage.local.set({widgetLocation:l.widgetLocation});
   if(l.type==="get-location")return O();
+  if(l&&l.type==="prewarm-ocr"){
+    try{
+      await ensureOffscreenDocument();
+      chrome.runtime.sendMessage({target:"offscreen",type:"prewarm-ocr"}).catch(()=>{});
+      return{success:!0};
+    }catch(err){
+      return{success:!1};
+    }
+  }
+  if(l&&l.type==="copy-to-clipboard"){
+    try{
+      await ensureOffscreenDocument();
+      const res=await chrome.runtime.sendMessage({
+        target:"offscreen",
+        type:"copy-to-clipboard",
+        text:l.text
+      });
+      return res||{success:!1};
+    }catch(err){
+      return{success:!1};
+    }
+  }
   if(l&&l.type==="do-ocr"){
     try{
       await ensureOffscreenDocument();

@@ -311,9 +311,20 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
     RangeError: RangeError,
     Element: MockElement,
     HTMLElement: MockElement,
-    HTMLImageElement: MockElement,
-    ImageData: class ImageData { constructor(w, h) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(w * h * 4); } },
-    Image: class Image { constructor() { this.onload = null; this.src = ""; } },
+    Image: class Image {
+      constructor() {
+        this.onload = null;
+        this.onerror = null;
+        this._src = "";
+      }
+      set src(val) {
+        this._src = val;
+        if (this.onload) setTimeout(() => this.onload(), 0);
+      }
+      get src() {
+        return this._src;
+      }
+    },
     Blob: globalThis.Blob,
     URL: class URLMock extends globalThis.URL {
       static createObjectURL(blob) { return "blob:mock-blob-" + Math.random(); }

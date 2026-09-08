@@ -29,8 +29,8 @@
 ## 🚀 安裝方式 (Installation)
 
 ### 方法 A：直接下載 Release 壓縮檔（推薦一般使用者）
-1. 前往 **[GitHub Releases 頁面](https://github.com/markleetw/let-me-see-see/releases/latest)** 下載最新版的 `let-me-see-see-v0.1.zip`。
-2. 解壓縮下載的 `let-me-see-see-v0.1.zip` 檔案至任意資料夾。
+1. 前往 **[GitHub Releases 頁面](https://github.com/markleetw/let-me-see-see/releases/latest)** 下載最新版的 `let-me-see-see-v0.2.0.zip`。
+2. 解壓縮下載的 `let-me-see-see-v0.2.0.zip` 檔案至任意資料夾。
 3. 開啟 Google Chrome 瀏覽器，在網址列輸入：
    ```text
    chrome://extensions/
@@ -140,10 +140,15 @@ let-me-see-see/
 │   └── icons8-google-slides-96.png
 └── dist/
     ├── background/
-    │   └── index.mjs              # Background Service Worker
+    │   └── index.mjs              # Background Service Worker (訊息轉發與 Offscreen 生命週期管理)
     ├── contentScripts/
-    │   ├── index.global.js        # 核心 Content Script (演算法、快取、工具列)
+    │   ├── index.global.js        # 核心 Content Script (演算法、快取、工具列、OCR 前後處理)
     │   └── style.css              # 浮動工具列與 Viewer.js 樣式
+    ├── offscreen/
+    │   ├── offscreen.html         # MV3 離屏文件容器
+    │   └── offscreen.js           # 離線 Tesseract WASM 執行沙盒與剪貼簿後備
+    ├── assets/
+    │   └── tesseract/             # 離線 Tesseract WASM 核心與繁體中文/英文語系包
     └── popup/
         └── index.html             # 擴充功能彈出設定面板
 ```

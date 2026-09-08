@@ -152,7 +152,7 @@ test("Suite 4: LRU Image Cache & Explicit GPU VRAM Cleanup", (t) => {
   assert.strictEqual(cache.has("img_31"), true, "Newest item img_31 must be present");
 });
 
-test("Suite 5: Clipboard Failure UI Feedback (Toast & Button Error State)", (t) => {
+test("Suite 5: Clipboard Failure UI Feedback (Toast & Button Error State)", async (t) => {
   const { context, doc, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
   vm.runInNewContext(contentScriptCode, context);
 
@@ -162,6 +162,17 @@ test("Suite 5: Clipboard Failure UI Feedback (Toast & Button Error State)", (t) 
   const toast = doc.getElementById("let-me-see-see-toast");
   assert.ok(toast, "Toast alert #let-me-see-see-toast must be created in DOM on error");
   assert.ok(toast.textContent.includes("複製失敗"), "Toast message must notify user about copy failure");
+
+  await t.test("uiToast stays persistent when duration is 0, and updates smoothly on completion", () => {
+    win.__letMeSeeSee.uiToast("正在辨識圖片文字 (OCR)...", 0);
+    const liveToast = doc.getElementById("let-me-see-see-toast");
+    assert.ok(liveToast, "Toast must be present in DOM");
+    assert.strictEqual(liveToast.textContent, "正在辨識圖片文字 (OCR)...", "Toast must display running state");
+
+    // When OCR completes, it updates the same element in-place
+    win.__letMeSeeSee.uiToast("已成功掃描並複製文字至剪貼簿！(15 字)", 3500);
+    assert.strictEqual(liveToast.textContent, "已成功掃描並複製文字至剪貼簿！(15 字)", "Toast text must update in-place without removing early");
+  });
 });
 
 test("Suite 6: Background Service Worker Initialization", (t) => {
@@ -474,11 +485,12 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     const offscreenScript = fs.readFileSync("dist/offscreen/offscreen.js", "utf8");
     const { context, chromeMock } = createMockEnv("chrome-extension://dummy-id/dist/offscreen/offscreen.html");
 
-    let recognizeCalledWith = null;
+    const recognizeCalls = [];
     context.Tesseract = {
       createWorker: async () => ({
+        setParameters: async () => {},
         recognize: async (img) => {
-          recognizeCalledWith = img;
+          recognizeCalls.push(img);
           return { data: { text: "離線 Tesseract 辨識結果：資料源總表" } };
         }
       })
@@ -495,7 +507,7 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
 
     assert.strictEqual(response.success, true, "Offscreen OCR response must report success");
     assert.strictEqual(response.text, "離線 Tesseract 辨識結果：資料源總表");
-    assert.strictEqual(recognizeCalledWith, "data:image/png;base64,mock");
+    assert.strictEqual(recognizeCalls[0], "data:image/png;base64,mock");
   });
 
   await t.test("ocrImageToText directly uses window.__letMeSeeSeeActiveRaster when present", async () => {
@@ -572,10 +584,278 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     const cleaned = win.__letMeSeeSee.cleanOcrText(input);
     assert.ok(!cleaned.includes(". - . _"), "Noise line 1 must be removed");
     assert.ok(!cleaned.includes("_ . _ . ."), "Noise line 2 must be removed");
-    assert.ok(cleaned.includes("資料源總表"), "Chinese header must be preserved");
-    assert.ok(cleaned.includes("卡片標題"), "Chinese cell text must be preserved");
-    assert.ok(cleaned.includes("首頁 「主題企劃」 5.4%"), "Chinese and percentage must be preserved");
+    assert.strictEqual(cleaned.includes("資料源總表"), true, "Chinese header must be preserved");
+    assert.strictEqual(cleaned.includes("卡片標題"), true, "Chinese cell text must be preserved");
+    assert.strictEqual(cleaned.includes("首頁「主題企劃」 5.4%"), true, "Chinese and percentage must be preserved without stray space");
+  });
+
+  await t.test("cleanOcrText filters out roadmap solid bar hallucinations and gibberish", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    const dirtyRoadmap = `Ww Gift Finder v2                                           System Noti Optimization Stage 2 Search Result Optimization
+es 、 、 ‧ ‧v,‧ ˊ〈b‧ˇ<zˇZzZ=”                              Se 加汪玉入入和生生加入入玉玉入入入入入國國加
+System Noti Optimization Stage 1     沁 Product Page Revamp             Ww Gift Finder v3
+a                              CEE eee
+sep                  oct                  nov                  dec                  jan                  feb                  mar
+2026
+es es)           re
+DWEB Browse Page Revamp         DWEB Homepage Revamp
+Homepage Iteration                                                             Product Page Iteration
+Offsite RMN (product marketing only)`;
+
+    const cleaned = win.__letMeSeeSee.cleanOcrText(dirtyRoadmap);
+
+    assert.ok(!cleaned.includes("加汪玉入入"), "Solid bar Chinese repetitive noise must be filtered out");
+    assert.ok(!cleaned.includes("‧v,‧ ˊ〈b"), "Solid bar punctuation noise must be filtered out");
+    assert.ok(!cleaned.includes("CEE eee"), "Stray single-character fragments must be filtered out");
+    assert.ok(!cleaned.includes("es es)"), "Stray short fragments must be filtered out");
+
+    assert.ok(cleaned.includes("Gift Finder v2"), "Real project title 1 must be kept and cleaned of star hallucination");
+    assert.ok(cleaned.includes("Product Page Revamp"), "Real project title 2 must be kept and cleaned of star hallucination");
+    assert.ok(cleaned.includes("System Noti Optimization Stage 2"), "Real project title 3 must be kept");
+    assert.ok(cleaned.includes("DWEB Browse Page Revamp"), "Real project title 4 must be kept");
+    assert.ok(cleaned.includes("sep  oct  nov  dec  jan  feb  mar"), "Timeline months must be kept");
+    assert.ok(cleaned.includes("2026"), "Year 2026 must be kept");
+  });
+
+  await t.test("cleanOcrText handles large text without catastrophic backtracking (ReDoS free)", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    // Construct a large text payload containing many short words and potential ReDoS patterns
+    const lines = [];
+    for (let i = 0; i < 100; i++) {
+      lines.push(`row ${i} a b c d e f g h i j k l m n o p q r s t u v w x y z 1 2026/08 US$ 94,505`);
+      lines.push(`es 、 、 ‧ ‧v,‧ ˊ〈b‧ˇ<zˇZzZ=” line ${i} test`);
+      lines.push(`es es) re`);
+    }
+    const massiveText = lines.join("\n");
+
+    const startTime = Date.now();
+    const cleaned = win.__letMeSeeSee.cleanOcrText(massiveText);
+    const duration = Date.now() - startTime;
+
+    assert.ok(duration < 100, `cleanOcrText must execute in < 100ms even for 300 lines (took ${duration}ms)`);
+    assert.ok(cleaned.includes("2026/08 US$ 94,505"), "Valid data must be kept");
+    assert.ok(!cleaned.includes("es es) re"), "Noise lines must be filtered");
+  });
+
+  await t.test("triggerOcrPrewarm sends prewarm-ocr message to background", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win, chromeMock } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    
+    let sentMsg = null;
+    chromeMock.runtime.sendMessage = async (msg) => {
+      sentMsg = msg;
+      return { success: true };
+    };
+
+    vm.runInNewContext(script, context);
+    win.__letMeSeeSee.triggerOcrPrewarm();
+
+    assert.ok(sentMsg !== null, "sentMsg should not be null");
+    assert.strictEqual(sentMsg.type, "prewarm-ocr", "Must send prewarm-ocr message to background");
+  });
+
+  await t.test("offscreen.js responds to prewarm-ocr message", async () => {
+    const offscreenScript = fs.readFileSync("dist/offscreen/offscreen.js", "utf8");
+    const { context, chromeMock } = createMockEnv("chrome-extension://dummy-id/dist/offscreen/offscreen.html");
+
+    let createWorkerCalled = false;
+    context.Tesseract = {
+      createWorker: async () => {
+        createWorkerCalled = true;
+        return {
+          setParameters: async () => {},
+          recognize: async () => ({ data: { text: "ready" } })
+        };
+      }
+    };
+
+    vm.runInNewContext(offscreenScript, context);
+
+    const listener = chromeMock.runtime.onMessage._listeners[0];
+    const response = await new Promise((resolve) => {
+      listener({ target: "offscreen", type: "prewarm-ocr" }, {}, resolve);
+    });
+
+    assert.strictEqual(response.success, true, "Prewarm must report success");
+    assert.strictEqual(response.prewarming, true, "Prewarm must set prewarming flag");
+    assert.strictEqual(createWorkerCalled, true, "Prewarm must initialize Tesseract worker");
+  });
+
+  await t.test("cleanOcrText removes spaces between Chinese characters and punctuation", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    const spacedChinese = "國 小 生 開 學 用 品\n首 頁 「 主 題 企 劃 」 5.4% US$ 81,379";
+    const cleaned = win.__letMeSeeSee.cleanOcrText(spacedChinese);
+
+    assert.ok(cleaned.includes("國小生開學用品"), "Stray spaces between Chinese characters must be removed");
+    assert.ok(cleaned.includes("首頁「主題企劃」 5.4% US$ 81,379"), "Chinese punctuation spaces removed while English/numbers retain spacing");
+  });
+
+  await t.test("offscreen.js filters low confidence tokens and joins CJK without spaces", async () => {
+    const offscreenScript = fs.readFileSync("dist/offscreen/offscreen.js", "utf8");
+    const { context, chromeMock } = createMockEnv("chrome-extension://dummy-id/dist/offscreen/offscreen.html");
+
+    context.Tesseract = {
+      createWorker: async () => ({
+        setParameters: async () => {},
+        recognize: async () => ({
+          data: {
+            lines: [
+              {
+                confidence: 30, // low line confidence (< 50) -> should be discarded
+                text: "加汪玉入入",
+                words: [{ text: "加汪玉入入", confidence: 30 }]
+              },
+              {
+                confidence: 85, // valid line
+                words: [
+                  { text: "國", confidence: 80 },
+                  { text: "小", confidence: 85 },
+                  { text: "生", confidence: 90 },
+                  { text: "a", confidence: 45 }, // single char with confidence < 60 -> filtered
+                  { text: "用品", confidence: 88 }
+                ]
+              }
+            ]
+          }
+        })
+      })
+    };
+
+    vm.runInNewContext(offscreenScript, context);
+    const listener = chromeMock.runtime.onMessage._listeners[0];
+    const response = await new Promise((resolve) => {
+      listener({ target: "offscreen", type: "do-ocr", image: "data:image/png;base64,mock" }, {}, resolve);
+    });
+
+    assert.strictEqual(response.success, true);
+    assert.ok(!response.text.includes("加汪玉入入"), "Low confidence line must be skipped");
+    assert.strictEqual(response.text, "國小生用品", "CJK words must be joined without spaces and low-confidence single-char skipped");
+  });
+
+  await t.test("cleanOcrText filters vertical pipe lines and repairs month numbers in Gantt charts", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    const dirtyGantt = "7 月 8 月 9 月 10 月 1 12 月 1B\n|\n|\n|\n|\niichi Project\n分潤廣告\nOffline Event Registration\nOffline Event Website";
+    const cleaned = win.__letMeSeeSee.cleanOcrText(dirtyGantt);
+
+    assert.ok(cleaned.includes("7月 8月 9月 10月 11月 12月 1月"), "Months must be cleaned, 1 repaired to 11月, and 1B fixed to 1月");
+    assert.ok(!cleaned.includes("|"), "Pipes must be filtered");
+    assert.ok(cleaned.includes("分潤廣告"), "Project names must be preserved");
+    assert.ok(cleaned.includes("Offline Event Website"), "English project names must be preserved");
+  });
+
+  await t.test("offscreen.js responds to copy-to-clipboard message", async () => {
+    const offscreenScript = fs.readFileSync("dist/offscreen/offscreen.js", "utf8");
+    const { context, chromeMock } = createMockEnv("chrome-extension://dummy-id/dist/offscreen/offscreen.html");
+
+    let copiedValue = null;
+    context.navigator = {
+      clipboard: {
+        writeText: async (t) => {
+          copiedValue = t;
+        }
+      }
+    };
+
+    vm.runInNewContext(offscreenScript, context);
+    const listener = chromeMock.runtime.onMessage._listeners[0];
+    const response = await new Promise((resolve) => {
+      listener({ target: "offscreen", type: "copy-to-clipboard", text: "已清洗文字" }, {}, resolve);
+    });
+
+    assert.strictEqual(response.success, true);
+    assert.strictEqual(response.copied, true);
+    assert.strictEqual(copiedValue, "已清洗文字", "Offscreen must copy clean text to clipboard");
+  });
+
+  await t.test("ocrImageToText cleans text before writing to clipboard", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win, chromeMock } = createMockEnv("https://docs.google.com/document/d/123/edit");
+
+    chromeMock.runtime.sendMessage = (msg, ...args) => {
+      const cb = typeof args[args.length - 1] === "function" ? args[args.length - 1] : null;
+      let res = null;
+      if (msg.type === "do-ocr") {
+        res = {
+          success: true,
+          text: "7 月 8 月 9 月 10 月 1 12 月 1B\n|\n|\n2026/04 USS 6,000"
+        };
+      }
+      if (cb) cb(res);
+      return Promise.resolve(res);
+    };
+
+    let writtenToClipboard = null;
+    win.navigator.clipboard.writeText = async (t) => {
+      writtenToClipboard = t;
+    };
+    context.navigator.clipboard.writeText = win.navigator.clipboard.writeText;
+
+    vm.runInNewContext(script, context);
+    await win.__letMeSeeSee.ocrImageToText("https://example.com/test.png");
+
+    assert.ok(writtenToClipboard !== null, "Cleaned text must be written to clipboard");
+    assert.ok(!writtenToClipboard.includes("|"), "Pipes must not be in clipboard");
+    assert.ok(writtenToClipboard.includes("7月 8月 9月 10月 11月 12月 1月"), "Timeline must be cleaned in clipboard");
+    assert.ok(writtenToClipboard.includes("US$ 6,000"), "Currency must be normalized in clipboard");
+  });
+
+  await t.test("cleanOcrText cleans header chevrons and normalizes CumulativeGap", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(script, context);
+
+    const dirtyHeader = "Month vy Goal(USD) v Actual (USD) » % Achv. CumulativeGap(USD) v";
+    const cleaned = win.__letMeSeeSee.cleanOcrText(dirtyHeader);
+
+    assert.ok(cleaned.includes("Cumulative Gap"), "CumulativeGap must be spaced as Cumulative Gap");
+    assert.ok(!cleaned.includes("vy"), "Stray chevron artifact vy must be removed");
+    assert.ok(!cleaned.includes("»"), "Stray chevron artifact » must be removed");
+  });
+
+  await t.test("extractLinesFromResult preserves 80.30% and financial percentage lines", async () => {
+    const offscreenScript = fs.readFileSync("dist/offscreen/offscreen.js", "utf8");
+    const { context } = createMockEnv("chrome-extension://dummy-id/dist/offscreen/offscreen.html");
+    vm.runInNewContext(offscreenScript, context);
+
+    const mockTesseractResult = {
+      data: {
+        lines: [
+          {
+            confidence: 42,
+            text: "2026/04 US$ 81,379 US$ 65,345 80.30% -16,034",
+            words: [
+              { text: "2026/04", confidence: 45 },
+              { text: "US$", confidence: 50 },
+              { text: "81,379", confidence: 48 },
+              { text: "US$", confidence: 52 },
+              { text: "65,345", confidence: 49 },
+              { text: "80.30%", confidence: 38 },
+              { text: "-16,034", confidence: 46 }
+            ]
+          }
+        ]
+      }
+    };
+
+    const lines = vm.runInContext("extractLinesFromResult(" + JSON.stringify(mockTesseractResult) + ")", context);
+    assert.strictEqual(lines.length, 1, "Line must not be dropped");
+    assert.ok(lines[0].includes("80.30%"), "80.30% must be preserved in line");
+    assert.ok(lines[0].includes("US$ 81,379"), "Currency amounts must be preserved");
   });
 });
+
+
 
 

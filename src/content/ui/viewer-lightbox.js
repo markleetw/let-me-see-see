@@ -138,7 +138,10 @@ export function openViewerLightbox(urls, initialIndex = 0, ViewerClass) {
         size: "large",
         click: () => {
           startLightboxCrop(viewerInstance, (cropDataUrl) => {
-            ocrImageToText(cropDataUrl);
+            if (typeof window !== "undefined") {
+              window.__letMeSeeSeeActiveRaster = null;
+            }
+            ocrImageToText(cropDataUrl, { isCrop: true });
           });
         }
       }

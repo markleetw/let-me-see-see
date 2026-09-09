@@ -10,10 +10,13 @@ import { copyTextToClipboard } from "../shared/clipboard.js";
 import { rasterToDataUrl } from "../shared/image-matcher.js";
 import { getImageBitmap } from "../shared/lru-cache.js";
 
-export async function ocrImageToText(imgUrl) {
+export async function ocrImageToText(imgUrl, options = {}) {
   if (!imgUrl) {
     uiToast("未指定圖片，無法進行文字辨識", 3000);
     return false;
+  }
+  if (options?.isCrop && typeof window !== "undefined") {
+    window.__letMeSeeSeeActiveRaster = null;
   }
   uiToast("正在辨識圖片文字 (OCR)...", 0);
 
@@ -34,7 +37,7 @@ export async function ocrImageToText(imgUrl) {
 
   // 2. Prepare image payload (prefer canvas base64 data URL, clamped to max 1600px for speed)
   let imagePayload = imgUrl;
-  if (window.__letMeSeeSeeActiveRaster?.pixels && window.__letMeSeeSeeActiveRaster?.width && window.__letMeSeeSeeActiveRaster?.height) {
+  if (!options?.isCrop && window.__letMeSeeSeeActiveRaster?.pixels && window.__letMeSeeSeeActiveRaster?.width && window.__letMeSeeSeeActiveRaster?.height) {
     const rasterDataUrl = rasterToDataUrl(window.__letMeSeeSeeActiveRaster);
     if (rasterDataUrl) imagePayload = rasterDataUrl;
   } else if (imgUrl.startsWith("http://") || imgUrl.startsWith("https://") || imgUrl.startsWith("blob:")) {

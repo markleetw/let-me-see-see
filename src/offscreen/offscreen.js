@@ -49,11 +49,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const worker = await getTesseractWorker();
         const enhancedImg = await enhanceImageForOcr(message.image);
-        const res = await worker.recognize(enhancedImg);
-        const lines = extractLinesFromResult(res);
+        let res = await worker.recognize(enhancedImg);
+        let lines = extractLinesFromResult(res);
         let text = lines.join("\n");
         if (!text && res?.data?.text) {
-          text = res.data.text;
+          text = res.data.text.trim();
+        }
+
+        // Snippet / Single-line fallback: if automatic layout (PSM 3) found no text,
+        // retry assuming single uniform text block (PSM 6)
+        if (!text && worker && typeof worker.setParameters === "function") {
+          try {
+            await worker.setParameters({ tessedit_pageseg_mode: "6" });
+            const retryRes = await worker.recognize(enhancedImg);
+            const retryLines = extractLinesFromResult(retryRes);
+            const retryText = retryLines.join("\n") || (retryRes?.data?.text || "").trim();
+            if (retryText) {
+              res = retryRes;
+              lines = retryLines;
+              text = retryText;
+            }
+          } catch (retryErr) {
+            console.warn("[Offscreen OCR] PSM 6 retry error:", retryErr);
+          } finally {
+            try {
+              await worker.setParameters({ tessedit_pageseg_mode: "3" });
+            } catch {}
+          }
         }
 
         const structuredLines = (res?.data?.lines || [])

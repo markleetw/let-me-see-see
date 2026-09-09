@@ -599,6 +599,82 @@ test("Suite 9: Image OCR Text Extraction to Clipboard", async (t) => {
     assert.strictEqual(writtenText, "2026/04 US$ 81,379 80.30%", "Must copy OCR text to clipboard");
   });
 
+  await t.test("ocrImageToText with isCrop: true ignores window.__letMeSeeSeeActiveRaster and sends crop dataUrl", async () => {
+    const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, win, chromeMock } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    delete win.TextDetector;
+
+    let receivedOcrImage = null;
+    chromeMock.runtime.sendMessage = (msg, ...args) => {
+      const cb = typeof args[args.length - 1] === "function" ? args[args.length - 1] : null;
+      let res = null;
+      if (msg.type === "do-ocr") {
+        receivedOcrImage = msg.image;
+        res = { success: true, text: "不同於傳統的抹茶碗" };
+      }
+      if (cb) cb(res);
+      return Promise.resolve(res);
+    };
+
+    let writtenText = "";
+    win.navigator.clipboard.writeText = async (txt) => {
+      writtenText = txt;
+    };
+
+    // Stale Docs canvas raster in memory
+    win.__letMeSeeSeeActiveRaster = {
+      width: 1024,
+      height: 768,
+      pixels: new Uint8ClampedArray(1024 * 768 * 4)
+    };
+
+    vm.runInNewContext(script, context);
+
+    const cropPayload = "data:image/png;base64,exactCropRegionOfMatchaBowl";
+    const ok = await win.__letMeSeeSee.ocrImageToText(cropPayload, { isCrop: true });
+    assert.strictEqual(ok, true, "Crop OCR must succeed");
+    assert.strictEqual(receivedOcrImage, cropPayload, "Must pass user's exact crop payload rather than stale active raster");
+    assert.strictEqual(win.__letMeSeeSeeActiveRaster, null, "Active raster must be cleared upon crop OCR");
+    assert.ok(writtenText.includes("不同於傳統的抹茶碗"), "Must copy extracted text to clipboard");
+  });
+
+  await t.test("offscreen.js retries with PSM 6 when initial recognition returns empty text", async () => {
+    const offscreenScript = fs.readFileSync("dist/offscreen/offscreen.js", "utf8");
+    const { context, chromeMock } = createMockEnv("chrome-extension://dummy-id/dist/offscreen/offscreen.html");
+
+    const psmParameters = [];
+    let recognizeAttempt = 0;
+    context.Tesseract = {
+      createWorker: async () => ({
+        setParameters: async (params) => {
+          psmParameters.push(params);
+        },
+        recognize: async (img) => {
+          recognizeAttempt++;
+          if (recognizeAttempt === 1) {
+            // First attempt with PSM 3 returns empty
+            return { data: { text: "", lines: [] } };
+          }
+          // Second attempt with PSM 6 successfully recognizes snippet
+          return { data: { text: "不同於傳統的抹茶碗，片口抹茶碗的設計能夠導流", lines: [{ text: "不同於傳統的抹茶碗，片口抹茶碗的設計能夠導流", confidence: 85 }] } };
+        }
+      })
+    };
+
+    vm.runInNewContext(offscreenScript, context);
+    const listener = chromeMock.runtime.onMessage._listeners[0];
+
+    const response = await new Promise((resolve) => {
+      listener({ target: "offscreen", type: "do-ocr", image: "data:image/png;base64,mockCrop" }, {}, resolve);
+    });
+
+    assert.strictEqual(response.success, true, "OCR response should succeed on retry");
+    assert.ok(response.text.includes("不同於傳統的抹茶碗"), "Extracted text should come from PSM 6 retry");
+    assert.strictEqual(recognizeAttempt, 2, "Must have called recognize twice (PSM 3 then PSM 6)");
+    assert.ok(psmParameters.some((p) => p.tessedit_pageseg_mode === "6"), "Must switch to PSM 6 on retry");
+    assert.strictEqual(psmParameters[psmParameters.length - 1].tessedit_pageseg_mode, "3", "Must restore default PSM 3 in finally block");
+  });
+
   await t.test("ocrImageToText reports failure toast when empty or not found", async () => {
     const script = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
     const { context, doc, win } = createMockEnv("https://docs.google.com/document/d/123/edit");

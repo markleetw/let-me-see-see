@@ -223,6 +223,9 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
     cleanup();
 
     if (cropDataUrl && typeof onCropSelected === "function") {
+      if (typeof window !== "undefined") {
+        window.__letMeSeeSeeActiveRaster = null;
+      }
       onCropSelected(cropDataUrl);
     } else {
       uiToast("圈選範圍未擷取到有效圖像", 2500);

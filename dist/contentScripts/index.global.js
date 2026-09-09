@@ -3718,6 +3718,9 @@
       const cropDataUrl = cropImageToDataUrl(img, cropBounds);
       cleanup();
       if (cropDataUrl && typeof onCropSelected === "function") {
+        if (typeof window !== "undefined") {
+          window.__letMeSeeSeeActiveRaster = null;
+        }
         onCropSelected(cropDataUrl);
       } else {
         uiToast("\u5708\u9078\u7BC4\u570D\u672A\u64F7\u53D6\u5230\u6709\u6548\u5716\u50CF", 2500);
@@ -4587,10 +4590,13 @@
   }
 
   // src/content/ocr/ocr-service.js
-  async function ocrImageToText(imgUrl) {
+  async function ocrImageToText(imgUrl, options = {}) {
     if (!imgUrl) {
       uiToast("\u672A\u6307\u5B9A\u5716\u7247\uFF0C\u7121\u6CD5\u9032\u884C\u6587\u5B57\u8FA8\u8B58", 3e3);
       return false;
+    }
+    if (options?.isCrop && typeof window !== "undefined") {
+      window.__letMeSeeSeeActiveRaster = null;
     }
     uiToast("\u6B63\u5728\u8FA8\u8B58\u5716\u7247\u6587\u5B57 (OCR)...", 0);
     if (typeof window.__letMeSeeSeeOcrEngine === "function") {
@@ -4607,7 +4613,7 @@
       }
     }
     let imagePayload = imgUrl;
-    if (window.__letMeSeeSeeActiveRaster?.pixels && window.__letMeSeeSeeActiveRaster?.width && window.__letMeSeeSeeActiveRaster?.height) {
+    if (!options?.isCrop && window.__letMeSeeSeeActiveRaster?.pixels && window.__letMeSeeSeeActiveRaster?.width && window.__letMeSeeSeeActiveRaster?.height) {
       const rasterDataUrl = rasterToDataUrl(window.__letMeSeeSeeActiveRaster);
       if (rasterDataUrl) imagePayload = rasterDataUrl;
     } else if (imgUrl.startsWith("http://") || imgUrl.startsWith("https://") || imgUrl.startsWith("blob:")) {
@@ -4881,7 +4887,10 @@
           size: "large",
           click: () => {
             startLightboxCrop(viewerInstance, (cropDataUrl) => {
-              ocrImageToText(cropDataUrl);
+              if (typeof window !== "undefined") {
+                window.__letMeSeeSeeActiveRaster = null;
+              }
+              ocrImageToText(cropDataUrl, { isCrop: true });
             });
           }
         }

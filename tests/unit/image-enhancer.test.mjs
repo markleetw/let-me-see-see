@@ -129,4 +129,78 @@ test("Unit: Image Enhancer for Offline OCR", async (t) => {
       globalThis.Image = origImg;
     }
   });
+
+  await t.test("Single line snippet: wide snippet (1024x59) is upscaled 2x and padded with clean whitespace", async () => {
+    const origDoc = globalThis.document;
+    const origImg = globalThis.Image;
+
+    try {
+      let drawnW = 0;
+      let drawnH = 0;
+      let canvasW = 0;
+      let canvasH = 0;
+      let recordedCanvasW = 0;
+      let recordedCanvasH = 0;
+      let paddingWhite = false;
+
+      const mockCanvas = {
+        set width(val) { canvasW = val; },
+        get width() { return canvasW; },
+        set height(val) { canvasH = val; },
+        get height() { return canvasH; },
+        getContext: () => ({
+          drawImage: (img, x, y, w, h) => {
+            drawnW = w;
+            drawnH = h;
+            recordedCanvasW = canvasW;
+            recordedCanvasH = canvasH;
+          },
+          getImageData: (x, y, w, h) => {
+            const data = new Uint8ClampedArray(w * h * 4);
+            // Simulate light document background
+            for (let i = 0; i < data.length; i += 4) {
+              data[i] = 245;
+              data[i + 1] = 245;
+              data[i + 2] = 245;
+              data[i + 3] = 255;
+            }
+            return { data };
+          },
+          putImageData: (imgData) => {
+            // Check that padding border pixels are set to 255
+            if (imgData.data[0] === 255 && imgData.data[1] === 255 && imgData.data[2] === 255) {
+              paddingWhite = true;
+            }
+          }
+        }),
+        toDataURL: () => "data:image/png;base64,mockPaddedSnippet"
+      };
+
+      globalThis.document = {
+        createElement: (tag) => (tag === "canvas" ? mockCanvas : {})
+      };
+
+      globalThis.Image = class {
+        constructor() {
+          this.width = 1024;
+          this.height = 59;
+          setTimeout(() => {
+            if (typeof this.onload === "function") this.onload();
+          }, 0);
+        }
+      };
+
+      const result = await enhanceImageForOcr("data:image/png;base64,snippet");
+      assert.strictEqual(result, "data:image/png;base64,mockPaddedSnippet");
+      assert.strictEqual(drawnW, 2048, "1024x59 snippet must upscale 2x to 2048px width");
+      assert.strictEqual(drawnH, 118, "1024x59 snippet must upscale 2x to 118px height");
+      assert.strictEqual(recordedCanvasW, 2048 + 36 * 2, "Canvas width must include 36px padding on both sides");
+      assert.strictEqual(recordedCanvasH, 118 + 36 * 2, "Canvas height must include 36px padding on both sides");
+      assert.strictEqual(paddingWhite, true, "Padding pixels must be pure white for Leptonica baseline recognition");
+    } finally {
+      globalThis.document = origDoc;
+      globalThis.Image = origImg;
+    }
+  });
 });
+

@@ -3528,69 +3528,6 @@
     }
   }
 
-  // src/content/ui/viewer-lightbox.js
-  var VIEWER_SOURCE_CONTAINER_ID = "let-me-see-see-viewer-source";
-  var viewerInstance = null;
-  function getOrCreateViewerSourceContainer() {
-    let container = document.getElementById(VIEWER_SOURCE_CONTAINER_ID);
-    if (!container) {
-      container = document.createElement("div");
-      container.id = VIEWER_SOURCE_CONTAINER_ID;
-      container.hidden = true;
-      document.body.appendChild(container);
-    }
-    return container;
-  }
-  function openViewerLightbox(urls, initialIndex = 0, ViewerClass) {
-    const validUrls = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
-    if (!validUrls.length) return false;
-    const container = getOrCreateViewerSourceContainer();
-    const images = validUrls.map((url, idx) => {
-      const img = document.createElement("img");
-      img.src = url;
-      img.alt = `Image ${idx + 1} of ${validUrls.length}`;
-      img.dataset.viewerLabel = img.alt;
-      return img;
-    });
-    container.replaceChildren(...images);
-    if (viewerInstance) {
-      viewerInstance.destroy();
-      viewerInstance = null;
-    }
-    const VClass = ViewerClass || window.Viewer;
-    if (!VClass) return false;
-    viewerInstance = new VClass(container, {
-      initialViewIndex: Math.max(0, Math.min(initialIndex, validUrls.length - 1)),
-      keyboard: true,
-      loop: false,
-      title: validUrls.length > 1 ? [1, (img) => img.dataset.viewerLabel || ""] : false,
-      navbar: false,
-      toolbar: {
-        zoomIn: 1,
-        zoomOut: 1,
-        oneToOne: 0,
-        reset: 1,
-        prev: validUrls.length > 1 ? 1 : 0,
-        play: { show: 0, size: "large" },
-        next: validUrls.length > 1 ? 1 : 0,
-        rotateLeft: 1,
-        rotateRight: 1,
-        flipHorizontal: 0,
-        flipVertical: 0
-      },
-      zoomRatio: 0.3,
-      hidden: () => toggleToolbarPreviewHidden(false)
-    });
-    toggleToolbarPreviewHidden(true);
-    try {
-      viewerInstance.show();
-      return true;
-    } catch (err) {
-      toggleToolbarPreviewHidden(false);
-      throw err;
-    }
-  }
-
   // src/content/ui/toast.js
   var toastTimeoutId = null;
   function uiToast(message, duration = 3e3) {
@@ -3637,6 +3574,157 @@
       }, duration);
     }
     return toastEl;
+  }
+
+  // src/content/ui/lightbox-crop.js
+  function calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, buffer = 8) {
+    if (!screenBox || !imgRect || !naturalWidth || !naturalHeight) {
+      return { cropX: 0, cropY: 0, cropW: 0, cropH: 0 };
+    }
+    const scaleX = naturalWidth / (imgRect.width || 1);
+    const scaleY = naturalHeight / (imgRect.height || 1);
+    const relX = screenBox.left - imgRect.left;
+    const relY = screenBox.top - imgRect.top;
+    const rawX0 = relX * scaleX - buffer;
+    const rawY0 = relY * scaleY - buffer;
+    const rawX1 = (relX + screenBox.width) * scaleX + buffer;
+    const rawY1 = (relY + screenBox.height) * scaleY + buffer;
+    const cropX = Math.max(0, Math.min(naturalWidth - 1, Math.round(rawX0)));
+    const cropY = Math.max(0, Math.min(naturalHeight - 1, Math.round(rawY0)));
+    const cropW = Math.max(1, Math.min(naturalWidth - cropX, Math.round(rawX1 - rawX0)));
+    const cropH = Math.max(1, Math.min(naturalHeight - cropY, Math.round(rawY1 - rawY0)));
+    return { cropX, cropY, cropW, cropH };
+  }
+  function cropImageToDataUrl(imgElement, cropBounds) {
+    if (!imgElement || !cropBounds || cropBounds.cropW <= 0 || cropBounds.cropH <= 0) return null;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = cropBounds.cropW;
+      canvas.height = cropBounds.cropH;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(
+        imgElement,
+        cropBounds.cropX,
+        cropBounds.cropY,
+        cropBounds.cropW,
+        cropBounds.cropH,
+        0,
+        0,
+        cropBounds.cropW,
+        cropBounds.cropH
+      );
+      return canvas.toDataURL("image/png");
+    } catch (err) {
+      console.warn("[Let Me See See] Canvas crop failed:", err);
+      return null;
+    }
+  }
+  var activeCropCleanup = null;
+  function startLightboxCrop(viewerInstance2, onCropSelected) {
+    if (!viewerInstance2 || !viewerInstance2.image) return;
+    if (activeCropCleanup) {
+      activeCropCleanup();
+      activeCropCleanup = null;
+      return;
+    }
+    const container = viewerInstance2.viewer || document.querySelector(".viewer-container");
+    const canvasEl = container?.querySelector(".viewer-canvas");
+    if (!canvasEl) return;
+    container.classList.add("lmss-crop-active");
+    const hintBanner = document.createElement("div");
+    hintBanner.className = "lmss-crop-hint";
+    hintBanner.innerHTML = `
+    <span class="lmss-crop-hint-icon">\u26F6</span>
+    <span>\u8ACB\u62D6\u66F3\u6ED1\u9F20\u5708\u9078\u8981\u8FA8\u8B58\u7684\u6587\u5B57\u5340\u57DF\uFF08\u653E\u958B\u5373\u8FA8\u8B58\uFF09</span>
+    <button type="button" class="lmss-crop-hint-close" title="\u53D6\u6D88\u5708\u9078">\u2715</button>
+  `;
+    container.appendChild(hintBanner);
+    const box = document.createElement("div");
+    box.className = "lmss-crop-box";
+    box.style.display = "none";
+    container.appendChild(box);
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    const onMouseDown = (e) => {
+      if (e.target.closest(".viewer-toolbar, .lmss-crop-hint, .viewer-button")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      box.style.left = `${startX}px`;
+      box.style.top = `${startY}px`;
+      box.style.width = "0px";
+      box.style.height = "0px";
+      box.style.display = "block";
+    };
+    const onMouseMove = (e) => {
+      if (!isDragging) return;
+      e.preventDefault();
+      const curX = e.clientX;
+      const curY = e.clientY;
+      const left = Math.min(startX, curX);
+      const top = Math.min(startY, curY);
+      const width = Math.abs(curX - startX);
+      const height = Math.abs(curY - startY);
+      box.style.left = `${left}px`;
+      box.style.top = `${top}px`;
+      box.style.width = `${width}px`;
+      box.style.height = `${height}px`;
+    };
+    const onMouseUp = (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      const endX = e.clientX;
+      const endY = e.clientY;
+      const screenBox = {
+        left: Math.min(startX, endX),
+        top: Math.min(startY, endY),
+        width: Math.abs(endX - startX),
+        height: Math.abs(endY - startY)
+      };
+      if (screenBox.width < 15 || screenBox.height < 15) {
+        cleanup();
+        return;
+      }
+      const img = viewerInstance2.image;
+      const imgRect = img.getBoundingClientRect();
+      const naturalWidth = viewerInstance2.imageData?.naturalWidth || img.naturalWidth || imgRect.width;
+      const naturalHeight = viewerInstance2.imageData?.naturalHeight || img.naturalHeight || imgRect.height;
+      const cropBounds = calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, 8);
+      const cropDataUrl = cropImageToDataUrl(img, cropBounds);
+      cleanup();
+      if (cropDataUrl && typeof onCropSelected === "function") {
+        onCropSelected(cropDataUrl);
+      } else {
+        uiToast("\u5708\u9078\u7BC4\u570D\u672A\u64F7\u53D6\u5230\u6709\u6548\u5716\u50CF", 2500);
+      }
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        cleanup();
+      }
+    };
+    const cleanup = () => {
+      container.classList.remove("lmss-crop-active");
+      hintBanner.remove();
+      box.remove();
+      window.removeEventListener("mousemove", onMouseMove, true);
+      window.removeEventListener("mouseup", onMouseUp, true);
+      canvasEl.removeEventListener("mousedown", onMouseDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+      activeCropCleanup = null;
+    };
+    activeCropCleanup = cleanup;
+    hintBanner.querySelector(".lmss-crop-hint-close").addEventListener("click", cleanup);
+    canvasEl.addEventListener("mousedown", onMouseDown, true);
+    window.addEventListener("mousemove", onMouseMove, true);
+    window.addEventListener("mouseup", onMouseUp, true);
+    window.addEventListener("keydown", onKeyDown, true);
   }
 
   // src/content/ocr/text-cleaner.js
@@ -4497,6 +4585,150 @@
     }
     uiToast("\u5716\u7247\u4E2D\u672A\u5075\u6E2C\u5230\u6587\u5B57", 3e3);
     return false;
+  }
+
+  // src/content/ui/viewer-lightbox.js
+  var VIEWER_SOURCE_CONTAINER_ID = "let-me-see-see-viewer-source";
+  var viewerInstance = null;
+  var TOOLBAR_SVG_ICONS = {
+    "zoom-in": {
+      title: "\u653E\u5927 (Zoom In)",
+      svg: `<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`
+    },
+    "zoom-out": {
+      title: "\u7E2E\u5C0F (Zoom Out)",
+      svg: `<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`
+    },
+    "one-to-one": {
+      title: "1:1 \u539F\u5716\u5927\u5C0F (Actual Size)",
+      svg: `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 8v8M15 8v8"></path></svg>`
+    },
+    "reset": {
+      title: "\u91CD\u8A2D (Reset)",
+      svg: `<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>`
+    },
+    "prev": {
+      title: "\u4E0A\u4E00\u5F35 (Previous)",
+      svg: `<svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>`
+    },
+    "next": {
+      title: "\u4E0B\u4E00\u5F35 (Next)",
+      svg: `<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>`
+    },
+    "rotate-left": {
+      title: "\u5411\u5DE6\u65CB\u8F49 (Rotate Left)",
+      svg: `<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 1 2.64 6.36"></path><polyline points="3 22 3 12 13 12"></polyline></svg>`
+    },
+    "rotate-right": {
+      title: "\u5411\u53F3\u65CB\u8F49 (Rotate Right)",
+      svg: `<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 0-2.64 6.36"></path><polyline points="21 22 21 12 11 12"></polyline></svg>`
+    },
+    "crop-ocr": {
+      title: "\u5C40\u90E8\u6846\u9078\u8FA8\u8B58 (Snippet OCR)",
+      svg: `<svg viewBox="0 0 24 24"><path d="M5 3H3v2M19 3h2v2M5 21H3v-2M19 21h2v-2"></path><rect x="7" y="7" width="10" height="10" rx="1.5" stroke-dasharray="2 2"></rect><circle cx="12" cy="12" r="1.5" fill="currentColor"></circle></svg>`
+    }
+  };
+  function renderModernViewerToolbar(vInstance) {
+    if (!vInstance) return;
+    const container = vInstance.viewer || document.querySelector(".viewer-container");
+    if (!container) return;
+    const items = container.querySelectorAll(".viewer-toolbar > ul > li");
+    items.forEach((li2) => {
+      if (li2.querySelector("svg")) return;
+      let action = li2.getAttribute("data-viewer-action") || "";
+      if (!action) {
+        for (const cls of li2.classList) {
+          if (cls.startsWith("viewer-") && cls !== "viewer-large" && cls !== "viewer-small") {
+            action = cls.replace("viewer-", "");
+            break;
+          }
+        }
+      }
+      if (!action) return;
+      const normalizedAction = action.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase()).replace(/^viewer-/, "");
+      const config = TOOLBAR_SVG_ICONS[normalizedAction] || TOOLBAR_SVG_ICONS[action];
+      if (config) {
+        li2.classList.add("lmss-has-svg");
+        if (normalizedAction === "crop-ocr" || action === "cropOcr") {
+          li2.classList.add("viewer-crop-ocr-btn");
+        }
+        li2.setAttribute("title", config.title);
+        li2.setAttribute("aria-label", config.title);
+        li2.innerHTML = config.svg;
+      }
+    });
+  }
+  function getOrCreateViewerSourceContainer() {
+    let container = document.getElementById(VIEWER_SOURCE_CONTAINER_ID);
+    if (!container) {
+      container = document.createElement("div");
+      container.id = VIEWER_SOURCE_CONTAINER_ID;
+      container.hidden = true;
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+  function openViewerLightbox(urls, initialIndex = 0, ViewerClass) {
+    const validUrls = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
+    if (!validUrls.length) return false;
+    const container = getOrCreateViewerSourceContainer();
+    const images = validUrls.map((url, idx) => {
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = `Image ${idx + 1} of ${validUrls.length}`;
+      img.dataset.viewerLabel = img.alt;
+      return img;
+    });
+    container.replaceChildren(...images);
+    if (viewerInstance) {
+      viewerInstance.destroy();
+      viewerInstance = null;
+    }
+    const VClass = ViewerClass || window.Viewer;
+    if (!VClass) return false;
+    viewerInstance = new VClass(container, {
+      initialViewIndex: Math.max(0, Math.min(initialIndex, validUrls.length - 1)),
+      keyboard: true,
+      loop: false,
+      title: validUrls.length > 1 ? [1, (img) => img.dataset.viewerLabel || ""] : false,
+      navbar: false,
+      toolbar: {
+        zoomIn: 1,
+        zoomOut: 1,
+        oneToOne: 1,
+        reset: 1,
+        prev: validUrls.length > 1 ? 1 : 0,
+        next: validUrls.length > 1 ? 1 : 0,
+        rotateLeft: 1,
+        rotateRight: 1,
+        cropOcr: {
+          show: 1,
+          size: "large",
+          click: () => {
+            startLightboxCrop(viewerInstance, (cropDataUrl) => {
+              ocrImageToText(cropDataUrl);
+            });
+          }
+        }
+      },
+      zoomRatio: 0.3,
+      viewed: () => {
+        renderModernViewerToolbar(viewerInstance);
+      },
+      shown: () => {
+        renderModernViewerToolbar(viewerInstance);
+      },
+      hidden: () => toggleToolbarPreviewHidden(false)
+    });
+    toggleToolbarPreviewHidden(true);
+    try {
+      viewerInstance.show();
+      setTimeout(() => renderModernViewerToolbar(viewerInstance), 50);
+      return true;
+    } catch (err) {
+      toggleToolbarPreviewHidden(false);
+      throw err;
+    }
   }
 
   // src/content/sheets/formula-parser.js

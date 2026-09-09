@@ -40,7 +40,7 @@ export function triggerBlobDownload(blob, filename) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 export async function fetchImageBlobWithRetry(url, retries = 2) {
@@ -146,19 +146,24 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
 
   uiToast(`正在打包下載全文件圖片 (0/${urls.length})...`, 0);
 
-  const blobs = Array.from({ length: urls.length }, () => null);
+  const zip = new JSZipClass();
+  const padLength = Math.max(2, String(urls.length).length);
   const failedItems = [];
   let currentIndex = 0;
   let doneCount = 0;
+  let successCount = 0;
 
   const worker = async () => {
     while (currentIndex < urls.length) {
       const idx = currentIndex++;
+      const currentUrl = urls[idx];
       try {
-        blobs[idx] = await fetchImageBlobWithRetry(urls[idx]);
+        const blob = await fetchImageBlobWithRetry(currentUrl);
+        successCount++;
+        const numStr = String(idx + 1).padStart(padLength, "0");
+        zip.file(`image-${numStr}.${getImageExtension(blob, currentUrl)}`, blob);
       } catch (err) {
-        blobs[idx] = null;
-        failedItems.push({ index: idx + 1, url: urls[idx], error: err?.message || String(err) });
+        failedItems.push({ index: idx + 1, url: currentUrl, error: err?.message || String(err) });
       }
       doneCount++;
       uiToast(`正在打包下載全文件圖片 (${doneCount}/${urls.length})...`, 0);
@@ -172,17 +177,6 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
 
   const poolSize = Math.min(4, urls.length);
   await Promise.all(Array.from({ length: poolSize }, worker));
-
-  const zip = new JSZipClass();
-  const padLength = Math.max(2, String(urls.length).length);
-  let successCount = 0;
-
-  blobs.forEach((blob, idx) => {
-    if (!blob) return;
-    successCount++;
-    const numStr = String(idx + 1).padStart(padLength, "0");
-    zip.file(`image-${numStr}.${getImageExtension(blob, urls[idx])}`, blob);
-  });
 
   const failedCount = urls.length - successCount;
 
@@ -204,10 +198,10 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
 
   if (successCount > 0) {
     uiToast("正在產生 ZIP 壓縮檔...", 0);
+    // Use STORE compression: images are already compressed; STORE is instant and saves CPU
     const zipBlob = await zip.generateAsync({
       type: "blob",
-      compression: "DEFLATE",
-      compressionOptions: { level: 6 }
+      compression: "STORE"
     });
     triggerBlobDownload(zipBlob, `${sanitizeFilename()}-images.zip`);
     if (failedCount > 0) {

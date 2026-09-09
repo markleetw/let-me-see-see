@@ -3741,7 +3741,7 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1e3);
+    window.setTimeout(() => URL.revokeObjectURL(url), 6e4);
   }
   async function fetchImageBlobWithRetry(url, retries = 2) {
     let lastError = null;
@@ -3836,18 +3836,23 @@
       return { downloaded: 0, failed: 0 };
     }
     uiToast(`\u6B63\u5728\u6253\u5305\u4E0B\u8F09\u5168\u6587\u4EF6\u5716\u7247 (0/${urls.length})...`, 0);
-    const blobs = Array.from({ length: urls.length }, () => null);
+    const zip = new JSZipClass();
+    const padLength = Math.max(2, String(urls.length).length);
     const failedItems = [];
     let currentIndex = 0;
     let doneCount = 0;
+    let successCount = 0;
     const worker = async () => {
       while (currentIndex < urls.length) {
         const idx = currentIndex++;
+        const currentUrl = urls[idx];
         try {
-          blobs[idx] = await fetchImageBlobWithRetry(urls[idx]);
+          const blob = await fetchImageBlobWithRetry(currentUrl);
+          successCount++;
+          const numStr = String(idx + 1).padStart(padLength, "0");
+          zip.file(`image-${numStr}.${getImageExtension(blob, currentUrl)}`, blob);
         } catch (err) {
-          blobs[idx] = null;
-          failedItems.push({ index: idx + 1, url: urls[idx], error: err?.message || String(err) });
+          failedItems.push({ index: idx + 1, url: currentUrl, error: err?.message || String(err) });
         }
         doneCount++;
         uiToast(`\u6B63\u5728\u6253\u5305\u4E0B\u8F09\u5168\u6587\u4EF6\u5716\u7247 (${doneCount}/${urls.length})...`, 0);
@@ -3861,15 +3866,6 @@
     };
     const poolSize = Math.min(4, urls.length);
     await Promise.all(Array.from({ length: poolSize }, worker));
-    const zip = new JSZipClass();
-    const padLength = Math.max(2, String(urls.length).length);
-    let successCount = 0;
-    blobs.forEach((blob, idx) => {
-      if (!blob) return;
-      successCount++;
-      const numStr = String(idx + 1).padStart(padLength, "0");
-      zip.file(`image-${numStr}.${getImageExtension(blob, urls[idx])}`, blob);
-    });
     const failedCount = urls.length - successCount;
     if (failedItems.length > 0) {
       const reportText = [
@@ -3889,8 +3885,7 @@
       uiToast("\u6B63\u5728\u7522\u751F ZIP \u58D3\u7E2E\u6A94...", 0);
       const zipBlob = await zip.generateAsync({
         type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: { level: 6 }
+        compression: "STORE"
       });
       triggerBlobDownload(zipBlob, `${sanitizeFilename()}-images.zip`);
       if (failedCount > 0) {

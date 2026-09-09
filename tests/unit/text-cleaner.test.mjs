@@ -72,6 +72,20 @@ test("Unit: OCR Text Cleaner & ReDoS Guard", async (t) => {
     // 烏 vs 鳥
     assert.strictEqual(disambiguateCjkCharacters("天邊鳥雲"), "天邊烏雲");
     assert.strictEqual(disambiguateCjkCharacters("樹上小烏"), "樹上小鳥");
+    // 茶筅 vs 茶笑
+    assert.strictEqual(disambiguateCjkCharacters("茶笑架"), "茶筅架");
+    assert.strictEqual(disambiguateCjkCharacters("茶笑座"), "茶筅座");
+    assert.strictEqual(disambiguateCjkCharacters("抹茶茶笑"), "抹茶茶筅");
+  });
+
+  await t.test("Matcha & E-commerce search tags: preserves title pipe, middle dot, and cleans quote arrow artifacts", () => {
+    const input1 = 'matcha-tw 的「片口抹茶碗推薦 | 輕鬆打出細膩茶泡」「茶笑架 . 茶笑座」';
+    const cleaned1 = cleanOcrText(input1);
+    assert.strictEqual(cleaned1, 'matcha-tw 的「片口抹茶碗推薦 | 輕鬆打出細膩茶泡」「茶筅架．茶筅座」');
+
+    const input2 = '雨中圓舞曲 的「防水鞋 m」「會呼吸的雨衣 "ARR」「質感雨具 ▶」';
+    const cleaned2 = cleanOcrText(input2);
+    assert.strictEqual(cleaned2, '雨中圓舞曲的「防水鞋」「會呼吸的雨衣」「質感雨具」');
   });
 
   await t.test("Performance & ReDoS Guard: 50,000 characters process in under 200ms (ReDoS free)", () => {

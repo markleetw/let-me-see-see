@@ -445,6 +445,61 @@ test("Unit: Table Structure Detection & TSV Formatting", async (t) => {
     assert.strictEqual(rows[0].split("\t").length, 5);
     assert.strictEqual(rows[1].split("\t").length, 5);
   });
+
+  await t.test("Inclusion: Onsite RMN report with top tab badge strips title badge and aligns all 5 columns without phantom columns", () => {
+    // media_1788940119085.png with top badge "OnsiteRMN v_ 圖"
+    const rmnWithBadgeLines = [
+      {
+        text: "OnsiteRMN v_ 圖",
+        words: [
+          { text: "OnsiteRMN", bbox: { x0: 20, x1: 90 } },
+          { text: "v_", bbox: { x0: 100, x1: 115 } },
+          { text: "圖", bbox: { x0: 130, x1: 145 } }
+        ]
+      },
+      {
+        text: "📅 Month ⌵ 💳 Goal (USD) ⌵ Act. / Est. (USD) ⌵ % Achv. ⌵ Cumulative Gap (USD) ⌵",
+        words: [
+          { text: "Month", bbox: { x0: 25, x1: 75 } },
+          { text: "Goal (USD)", bbox: { x0: 230, x1: 320 } },
+          { text: "Act. / Est. (USD)", bbox: { x0: 420, x1: 540 } },
+          { text: "% Achv.", bbox: { x0: 640, x1: 700 } },
+          { text: "Cumulative Gap (USD)", bbox: { x0: 880, x1: 990 } }
+        ]
+      },
+      {
+        text: "2026/04 US$ 81,379 US$ 65,345 80.30% -16,034",
+        words: [
+          { text: "2026/04", bbox: { x0: 25, x1: 85 } },
+          { text: "US$ 81,379", bbox: { x0: 230, x1: 310 } },
+          { text: "US$ 65,345", bbox: { x0: 420, x1: 500 } },
+          { text: "80.30%", bbox: { x0: 640, x1: 695 } },
+          { text: "-16,034", bbox: { x0: 880, x1: 940 } }
+        ]
+      },
+      {
+        text: "2026/05 US$ 90,977 US$ 71,171 78.23% -35,841",
+        words: [
+          { text: "2026/05", bbox: { x0: 25, x1: 85 } },
+          { text: "US$ 90,977", bbox: { x0: 230, x1: 310 } },
+          { text: "US$ 71,171", bbox: { x0: 420, x1: 500 } },
+          { text: "78.23%", bbox: { x0: 640, x1: 695 } },
+          { text: "-35,841", bbox: { x0: 880, x1: 940 } }
+        ]
+      }
+    ];
+
+    const result = detectTableFromTesseractResult(rmnWithBadgeLines);
+    assert.strictEqual(result.isTable, true);
+    assert.strictEqual(result.colCount, 5, "Must have exactly 5 columns without phantom columns");
+    assert.strictEqual(result.rowCount, 3, "Must have 3 rows (title badge omitted, header + 2 data rows)");
+
+    const rows = result.tsv.split("\n");
+    assert.ok(!rows[0].includes("OnsiteRMN"), "Top title badge must NOT be in the TSV grid");
+    assert.strictEqual(rows[0], "Month\tGoal (USD)\tAct. / Est. (USD)\t% Achv.\tCumulative Gap (USD)");
+    assert.strictEqual(rows[1], "2026/04\tUS$ 81,379\tUS$ 65,345\t80.30%\t-16,034");
+    assert.strictEqual(rows[2], "2026/05\tUS$ 90,977\tUS$ 71,171\t78.23%\t-35,841");
+  });
 });
 
 

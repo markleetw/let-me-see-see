@@ -3799,6 +3799,8 @@
       line = line.replace(/(?:^|\s+)(?:Ww|沁)\s+(?=[A-Z\u4e00-\u9fa5])/g, " ");
       const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
       line = line.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
+      line = line.replace(/([\u4e00-\u9fa5])\s*[.．·・•]\s*(?=[\u4e00-\u9fa5])/g, "$1\uFF0E");
+      line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:[a-zA-Z]{1,4}|[►▶>»~^"'\-]+)\s*([」』])/g, "$1$2");
       line = disambiguateCjkCharacters(line);
       line = line.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
       line = line.replace(/\busS\s*/g, "US$ ");
@@ -3811,15 +3813,16 @@
         line = line.replace(/(?<!\/)\b([1-9]|1[0-2])\s*[bB](?![.%/\d])\b/g, "$1\u6708");
       }
       line = line.replace(/CumulativeGap\b/g, "Cumulative Gap");
-      line = line.replace(/[»«▾▼]/g, "");
+      line = line.replace(/[»«▾▼►▶]/g, "");
       line = line.replace(/\bvy\b/gi, "");
       line = line.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
-      line = line.replace(/(\d)[|Il](\d)/g, "$11$2");
-      line = line.replace(/(\d)[|Il],/g, "$11,");
-      line = line.replace(/,[|Il](\d)/g, ",1$1");
+      line = line.replace(/\|\s+\|/g, " ");
+      line = line.replace(/(\d)[|Il]+(?=[,\s\t]|$)/g, (m, d) => d + "1".repeat(m.length - 1));
+      line = line.replace(/,[|Il]+(\d)/g, (m, d) => ",1" + d);
+      line = line.replace(/(\d)[|Il]+(\d)/g, (m, d1, d2) => d1 + "1" + d2);
       line = line.replace(/\b[|Il](\d)/g, "1$1");
-      line = line.replace(/(\d)[|Il]\b/g, "$11");
-      line = line.replace(/-\s*[|Il]\s*/g, "-1");
+      line = line.replace(/([0-9,])[|Il]+([0-9,])/g, (m, p1, p2) => p1 + "1".repeat(m.length - p1.length - p2.length) + p2);
+      line = line.replace(/-\s*[|Il]+\s*(?=[0-9bBoO])/g, "-1");
       line = line.replace(/(\d)[bB](\d)/g, "$16$2");
       line = line.replace(/(\d)[bB],/g, "$16,");
       line = line.replace(/,[bB](\d)/g, ",6$1");
@@ -3833,8 +3836,8 @@
       line = line.replace(/,[oO](\d)/g, ",0$1");
       line = line.replace(/(\d)[oO],/g, "$10,");
       line = line.replace(/(\d)[oO]%/g, "$10%");
-      line = line.replace(/\|/g, "1");
       line = line.replace(/-(\d+)\s+([0-9bBoO]+),/g, "-$1$2,");
+      line = line.replace(/(?<=[0-9%])\s*\|\s*(?=[0-9$])/g, " ");
       line = line.replace(/\s{3,}/g, "  ").trim();
       cleaned.push(line);
     }
@@ -3850,15 +3853,18 @@
     val = val.replace(/\b(20[12])[bB]\/([0-1][\dbB])\b/g, (m, y, mo) => y + "6/" + mo.replace(/[bB]/g, "6"));
     val = val.replace(/\b(20\d\d)[1l|I/]([0-1]\d)\b/g, "$1/$2");
     val = val.replace(/CumulativeGap\b/g, "Cumulative Gap");
-    val = val.replace(/[»«▾▼]/g, "");
+    val = val.replace(/^[📅💳\s]+/g, "");
+    val = val.replace(/[»«▾▼►▶]/g, "");
+    val = val.replace(/\s*[⌵▼▾►▶]\s*$/g, "");
+    val = val.replace(/\s+[vV]\s*$/g, "");
     val = val.replace(/\bvy\b/gi, "");
     val = val.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
-    val = val.replace(/(\d)[|Il](\d)/g, "$11$2");
-    val = val.replace(/(\d)[|Il],/g, "$11,");
-    val = val.replace(/,[|Il](\d)/g, ",1$1");
+    val = val.replace(/(\d)[|Il]+(?=[,\s\t]|$)/g, (m, d) => d + "1".repeat(m.length - 1));
+    val = val.replace(/,[|Il]+(\d)/g, (m, d) => ",1" + d);
+    val = val.replace(/(\d)[|Il]+(\d)/g, (m, d1, d2) => d1 + "1" + d2);
     val = val.replace(/\b[|Il](\d)/g, "1$1");
-    val = val.replace(/(\d)[|Il]\b/g, "$11");
-    val = val.replace(/-\s*[|Il]\s*/g, "-1");
+    val = val.replace(/([0-9,])[|Il]+([0-9,])/g, (m, p1, p2) => p1 + "1".repeat(m.length - p1.length - p2.length) + p2);
+    val = val.replace(/-\s*[|Il]+\s*(?=[0-9bBoO])/g, "-1");
     val = val.replace(/(\d)[bB](\d)/g, "$16$2");
     val = val.replace(/(\d)[bB],/g, "$16,");
     val = val.replace(/,[bB](\d)/g, ",6$1");
@@ -3881,6 +3887,11 @@
   function disambiguateCjkCharacters(text) {
     if (!text) return "";
     let val = text;
+    val = val.replace(/茶[笑咲]/g, "\u8336\u7B45");
+    val = val.replace(/[笑咲]架/g, "\u7B45\u67B6");
+    val = val.replace(/[笑咲]座/g, "\u7B45\u5EA7");
+    val = val.replace(/百本[笑咲]/g, "\u767E\u672C\u7B45");
+    val = val.replace(/竹[笑咲]/g, "\u7AF9\u7B45");
     val = val.replace(/雨用/g, "\u5169\u7528");
     val = val.replace(/雨([種者個款件組套面色岸難倍側旁端邊隻條位次張把台瓶盒度])/g, "\u5169$1");
     val = val.replace(/兩([衣傘靴])/g, "\u96E8$1");
@@ -3924,31 +3935,34 @@
   // src/content/ocr/table-detector.js
   function findColumnBins(rows, tolerance = 35) {
     const allXStarts = [];
-    for (const row of rows) {
-      for (const cell of row) {
+    for (let r = 0; r < rows.length; r++) {
+      for (const cell of rows[r]) {
         if (typeof cell.x0 === "number") {
-          allXStarts.push(cell.x0);
+          allXStarts.push({ x: cell.x0, rowIdx: r });
         }
       }
     }
     if (allXStarts.length === 0) return [];
-    allXStarts.sort((a, b) => a - b);
+    allXStarts.sort((a, b) => a.x - b.x);
     const clusters = [];
     let currentCluster = null;
-    for (const x of allXStarts) {
+    for (const item of allXStarts) {
+      const x = item.x;
       if (!currentCluster) {
-        currentCluster = { points: [x], mean: x, min: x, max: x };
+        currentCluster = { points: [x], rows: /* @__PURE__ */ new Set([item.rowIdx]), mean: x, min: x, max: x };
         clusters.push(currentCluster);
       } else if (Math.abs(currentCluster.mean - x) <= tolerance) {
         currentCluster.points.push(x);
+        currentCluster.rows.add(item.rowIdx);
         currentCluster.mean = (currentCluster.mean * (currentCluster.points.length - 1) + x) / currentCluster.points.length;
         currentCluster.max = x;
       } else {
-        currentCluster = { points: [x], mean: x, min: x, max: x };
+        currentCluster = { points: [x], rows: /* @__PURE__ */ new Set([item.rowIdx]), mean: x, min: x, max: x };
         clusters.push(currentCluster);
       }
     }
-    return clusters.filter((c) => c.points.length >= 2).sort((a, b) => a.mean - b.mean).map((c) => ({
+    const minRows = Math.max(2, Math.floor(rows.length * 0.35));
+    return clusters.filter((c) => c.rows.size >= minRows).sort((a, b) => a.mean - b.mean).map((c) => ({
       centerX: c.mean,
       minX: c.min,
       maxX: c.max
@@ -3958,7 +3972,7 @@
     if (!Array.isArray(rawLines) || rawLines.length < 2) {
       return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
     }
-    const rows = [];
+    let rows = [];
     for (const line of rawLines) {
       const validWords = (line.words || []).filter((w) => {
         const t = (w.text || "").trim();
@@ -3986,6 +4000,14 @@
     }
     if (rows.length < 2) {
       return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+    }
+    if (rows.length >= 3) {
+      const subsequentColCounts = rows.slice(1).map((r) => r.length);
+      const sortedCounts = [...subsequentColCounts].sort((a, b) => a - b);
+      const medianCols = sortedCounts[Math.floor(sortedCounts.length / 2)];
+      if (medianCols >= 4 && rows[0].length <= Math.floor(medianCols * 0.5)) {
+        rows.shift();
+      }
     }
     if (rows.some(isTimelineRow)) {
       return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };

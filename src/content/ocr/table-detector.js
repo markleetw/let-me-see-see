@@ -15,38 +15,41 @@ import { cleanOcrText, cleanTableCell } from "./text-cleaner.js";
  */
 export function findColumnBins(rows, tolerance = 35) {
   const allXStarts = [];
-  for (const row of rows) {
-    for (const cell of row) {
+  for (let r = 0; r < rows.length; r++) {
+    for (const cell of rows[r]) {
       if (typeof cell.x0 === "number") {
-        allXStarts.push(cell.x0);
+        allXStarts.push({ x: cell.x0, rowIdx: r });
       }
     }
   }
 
   if (allXStarts.length === 0) return [];
-  allXStarts.sort((a, b) => a - b);
+  allXStarts.sort((a, b) => a.x - b.x);
 
-  // Group close X coordinates into clusters via single-pass linear sweep
+  // Group close X coordinates into clusters via single-pass linear sweep across distinct rows
   const clusters = [];
   let currentCluster = null;
 
-  for (const x of allXStarts) {
+  for (const item of allXStarts) {
+    const x = item.x;
     if (!currentCluster) {
-      currentCluster = { points: [x], mean: x, min: x, max: x };
+      currentCluster = { points: [x], rows: new Set([item.rowIdx]), mean: x, min: x, max: x };
       clusters.push(currentCluster);
     } else if (Math.abs(currentCluster.mean - x) <= tolerance) {
       currentCluster.points.push(x);
+      currentCluster.rows.add(item.rowIdx);
       currentCluster.mean = (currentCluster.mean * (currentCluster.points.length - 1) + x) / currentCluster.points.length;
       currentCluster.max = x;
     } else {
-      currentCluster = { points: [x], mean: x, min: x, max: x };
+      currentCluster = { points: [x], rows: new Set([item.rowIdx]), mean: x, min: x, max: x };
       clusters.push(currentCluster);
     }
   }
 
-  // Filter clusters: must appear in at least 2 distinct rows or have sufficient frequency
+  // Filter clusters: must appear in at least 2 distinct rows to prevent phantom columns
+  const minRows = Math.max(2, Math.floor(rows.length * 0.35));
   return clusters
-    .filter((c) => c.points.length >= 2)
+    .filter((c) => c.rows.size >= minRows)
     .sort((a, b) => a.mean - b.mean)
     .map((c) => ({
       centerX: c.mean,
@@ -66,7 +69,7 @@ export function detectTableFromTesseractResult(rawLines) {
   }
 
   // 1. Group words within each line into cell candidates based on horizontal spacing
-  const rows = [];
+  let rows = [];
   for (const line of rawLines) {
     const validWords = (line.words || []).filter((w) => {
       const t = (w.text || "").trim();
@@ -101,6 +104,16 @@ export function detectTableFromTesseractResult(rawLines) {
 
   if (rows.length < 2) {
     return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+  }
+
+  // 1.5. Strip leading non-grid title tabs / document badges (e.g. "OnsiteRMN v_ 圖" which has <= 2 cells while table body has >= 4 cells)
+  if (rows.length >= 3) {
+    const subsequentColCounts = rows.slice(1).map((r) => r.length);
+    const sortedCounts = [...subsequentColCounts].sort((a, b) => a - b);
+    const medianCols = sortedCounts[Math.floor(sortedCounts.length / 2)];
+    if (medianCols >= 4 && rows[0].length <= Math.floor(medianCols * 0.5)) {
+      rows.shift(); // Remove top title badge from grid
+    }
   }
 
   // Reject timelines, roadmaps, and Gantt charts with month/quarter axes

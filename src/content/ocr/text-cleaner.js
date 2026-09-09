@@ -58,7 +58,13 @@ export function cleanOcrText(text) {
     const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
     line = line.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
 
-    // Contextual CJK disambiguation (e.g. 雨 vs 兩)
+    // Clean center dot between CJK characters (e.g. "茶筅架 . 茶筅座" -> "茶筅架．茶筅座")
+    line = line.replace(/([\u4e00-\u9fa5])\s*[.．·・•]\s*(?=[\u4e00-\u9fa5])/g, "$1．");
+
+    // Clean trailing chevron/arrow hallucinations inside quotes (e.g. 「防水鞋 m」 -> 「防水鞋」, 「會呼吸的雨衣 "ARR」 -> 「會呼吸的雨衣」)
+    line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:[a-zA-Z]{1,4}|[►▶>»~^"'\-]+)\s*([」』])/g, "$1$2");
+
+    // Contextual CJK disambiguation (e.g. 雨 vs 兩, 茶筅 vs 茶笑)
     line = disambiguateCjkCharacters(line);
 
     // Normalize Currency: usS, USS, us$, etc. -> US$
@@ -79,18 +85,21 @@ export function cleanOcrText(text) {
 
     // Clean header chevrons and normalize CumulativeGap
     line = line.replace(/CumulativeGap\b/g, "Cumulative Gap");
-    line = line.replace(/[»«▾▼]/g, "");
+    line = line.replace(/[»«▾▼►▶]/g, "");
     line = line.replace(/\bvy\b/gi, "");
     line = line.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
 
+    // Remove Gantt chart double pipe noise (e.g. "| |")
+    line = line.replace(/\|\s+\|/g, " ");
+
     // Normalize Numbers & Financial amounts:
     // Replace pipes | and uppercase I / lowercase l inside numbers with 1
-    line = line.replace(/(\d)[|Il](\d)/g, "$11$2");
-    line = line.replace(/(\d)[|Il],/g, "$11,");
-    line = line.replace(/,[|Il](\d)/g, ",1$1");
+    line = line.replace(/(\d)[|Il]+(?=[,\s\t]|$)/g, (m, d) => d + "1".repeat(m.length - 1));
+    line = line.replace(/,[|Il]+(\d)/g, (m, d) => ",1" + d);
+    line = line.replace(/(\d)[|Il]+(\d)/g, (m, d1, d2) => d1 + "1" + d2);
     line = line.replace(/\b[|Il](\d)/g, "1$1");
-    line = line.replace(/(\d)[|Il]\b/g, "$11");
-    line = line.replace(/-\s*[|Il]\s*/g, "-1");
+    line = line.replace(/([0-9,])[|Il]+([0-9,])/g, (m, p1, p2) => p1 + "1".repeat(m.length - p1.length - p2.length) + p2);
+    line = line.replace(/-\s*[|Il]+\s*(?=[0-9bBoO])/g, "-1");
 
     // Replace 'b' / 'B' inside numbers/amounts with 6
     line = line.replace(/(\d)[bB](\d)/g, "$16$2");
@@ -109,11 +118,11 @@ export function cleanOcrText(text) {
     line = line.replace(/(\d)[oO],/g, "$10,");
     line = line.replace(/(\d)[oO]%/g, "$10%");
 
-    // Replace standalone pipes inside numbers: e.g. -1||,4|2 -> -111,412
-    line = line.replace(/\|/g, "1");
-
     // Clean stray negative spaces: e.g. "-1 b,o34" -> "-16,034"
     line = line.replace(/-(\d+)\s+([0-9bBoO]+),/g, "-$1$2,");
+
+    // Clean stray pipes strictly surrounded by financial numbers / dates
+    line = line.replace(/(?<=[0-9%])\s*\|\s*(?=[0-9$])/g, " ");
 
     // Normalize tabular whitespace
     line = line.replace(/\s{3,}/g, "  ").trim();
@@ -143,17 +152,20 @@ export function cleanTableCell(text) {
 
   // Clean header chevrons and normalize CumulativeGap
   val = val.replace(/CumulativeGap\b/g, "Cumulative Gap");
-  val = val.replace(/[»«▾▼]/g, "");
+  val = val.replace(/^[📅💳\s]+/g, "");
+  val = val.replace(/[»«▾▼►▶]/g, "");
+  val = val.replace(/\s*[⌵▼▾►▶]\s*$/g, "");
+  val = val.replace(/\s+[vV]\s*$/g, "");
   val = val.replace(/\bvy\b/gi, "");
   val = val.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
 
   // Normalize Numbers & Financial amounts:
-  val = val.replace(/(\d)[|Il](\d)/g, "$11$2");
-  val = val.replace(/(\d)[|Il],/g, "$11,");
-  val = val.replace(/,[|Il](\d)/g, ",1$1");
+  val = val.replace(/(\d)[|Il]+(?=[,\s\t]|$)/g, (m, d) => d + "1".repeat(m.length - 1));
+  val = val.replace(/,[|Il]+(\d)/g, (m, d) => ",1" + d);
+  val = val.replace(/(\d)[|Il]+(\d)/g, (m, d1, d2) => d1 + "1" + d2);
   val = val.replace(/\b[|Il](\d)/g, "1$1");
-  val = val.replace(/(\d)[|Il]\b/g, "$11");
-  val = val.replace(/-\s*[|Il]\s*/g, "-1");
+  val = val.replace(/([0-9,])[|Il]+([0-9,])/g, (m, p1, p2) => p1 + "1".repeat(m.length - p1.length - p2.length) + p2);
+  val = val.replace(/-\s*[|Il]+\s*(?=[0-9bBoO])/g, "-1");
 
   val = val.replace(/(\d)[bB](\d)/g, "$16$2");
   val = val.replace(/(\d)[bB],/g, "$16,");
@@ -183,11 +195,19 @@ export function cleanTableCell(text) {
 
 /**
  * Disambiguate visually similar CJK characters based on high-frequency linguistic context.
- * Resolves frequent Tesseract confusion between '雨' (rain) and '兩' (two/dual/both).
+ * Resolves frequent Tesseract confusion between '雨' (rain) and '兩' (two/dual/both),
+ * and tea whisk '茶筅' vs '茶笑'.
  */
 export function disambiguateCjkCharacters(text) {
   if (!text) return "";
   let val = text;
+
+  // 0. Fix '茶筅' (matcha whisk) falsely recognized as '茶笑' or '茶咲'
+  val = val.replace(/茶[笑咲]/g, "茶筅");
+  val = val.replace(/[笑咲]架/g, "筅架");
+  val = val.replace(/[笑咲]座/g, "筅座");
+  val = val.replace(/百本[笑咲]/g, "百本筅");
+  val = val.replace(/竹[笑咲]/g, "竹筅");
 
   // 1. Fix '雨' falsely recognized where '兩' is the intended character:
   // e.g. "雨用" -> "兩用" (兩用托特包, 兩用後背包, 兩用手提包, 兩用包, 晴雨兩用)

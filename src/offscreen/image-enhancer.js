@@ -18,12 +18,14 @@ export async function enhanceImageForOcr(imageSource) {
     const origW = img.naturalWidth || img.width;
     const origH = img.naturalHeight || img.height;
 
-    // 1. Adaptive 2x Upscaling for small images / cropped snippets
+    // 1. Adaptive 2x Upscaling for small snippets / cropped single-line images
     // Tesseract LSTM requires character height of ~30-35px.
-    // If image height < 500px or width < 800px, 12-18px Chinese characters
-    // have merged strokes; upscaling 2x cleanly separates fine strokes.
+    // If image height < 140px or small low-res box (<220px high and <350px wide),
+    // fine strokes benefit from 2x scaling.
+    // Larger document/table screenshots (e.g. 1024x319) MUST maintain 1:1 native resolution
+    // to prevent font anti-aliasing blur and yellow/colored cell wash-out.
     let scale = 1;
-    if (origH < 500 || origW < 800) {
+    if (origH < 140 || (origH < 220 && origW < 350)) {
       scale = 2;
     }
     // Prevent exceeding maximum safe WASM dimension (2400px) or excessive memory (> 3,000,000 pixels)
@@ -37,7 +39,7 @@ export async function enhanceImageForOcr(imageSource) {
     // 2. Padding margin for small snippets / single lines
     // Leptonica baseline fitting and Otsu binarization require whitespace margins
     // around text lines; tight crops often get rejected without margin.
-    const needPadding = origH < 250 || origW < 500;
+    const needPadding = origH < 140 || (origH < 220 && origW < 350);
     const pad = needPadding ? 36 : 0;
 
     const targetW = Math.round(origW * scale);
@@ -119,8 +121,9 @@ export async function enhanceImageForOcr(imageSource) {
       }
     }
 
-    // 4. Contrast adjustment for photos / low-contrast backgrounds
-    if (isDarkBackground || avgBorderLuma < 200) {
+    // 4. Contrast adjustment ONLY for inverted/dark background images
+    // Never modify contrast of light documents / spreadsheets to avoid washing out colored/yellow cells
+    if (isDarkBackground) {
       const contrastFactor = 1.15;
       for (let y = pad; y < pad + targetH; y++) {
         for (let x = pad; x < pad + targetW; x++) {

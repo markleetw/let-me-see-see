@@ -123,7 +123,7 @@
       const origW = img.naturalWidth || img.width;
       const origH = img.naturalHeight || img.height;
       let scale = 1;
-      if (origH < 500 || origW < 800) {
+      if (origH < 140 || origH < 220 && origW < 350) {
         scale = 2;
       }
       if (origW * scale > 2400 || origH * scale > 2400 || origW * scale * origH * scale > 3e6) {
@@ -132,7 +132,7 @@
           scale = Math.max(1, 2400 / maxDim);
         }
       }
-      const needPadding = origH < 250 || origW < 500;
+      const needPadding = origH < 140 || origH < 220 && origW < 350;
       const pad = needPadding ? 36 : 0;
       const targetW = Math.round(origW * scale);
       const targetH = Math.round(origH * scale);
@@ -190,7 +190,7 @@
           }
         }
       }
-      if (isDarkBackground || avgBorderLuma < 200) {
+      if (isDarkBackground) {
         const contrastFactor = 1.15;
         for (let y = pad; y < pad + targetH; y++) {
           for (let x = pad; x < pad + targetW; x++) {

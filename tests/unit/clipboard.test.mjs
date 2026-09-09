@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert";
 import { copyTextToClipboard, copyImageToClipboard, imageSourceToPngBlob } from "../../src/content/shared/clipboard.js";
 
+if (!globalThis.navigator) {
+  globalThis.navigator = {};
+}
+
 test("Unit: Clipboard Utilities & Image Copying", async (t) => {
   await t.test("copyTextToClipboard: writes text using navigator.clipboard.writeText", async () => {
     let written = "";

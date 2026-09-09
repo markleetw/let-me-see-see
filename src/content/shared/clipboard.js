@@ -11,7 +11,7 @@ export async function copyTextToClipboard(text) {
   if (!text) return false;
 
   try {
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
       await navigator.clipboard.writeText(text);
       return true;
     }
@@ -108,7 +108,12 @@ export async function copyImageToClipboard(imgUrlOrBlob) {
     }
   }
 
-  if (!imgUrlOrBlob || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+  if (
+    !imgUrlOrBlob ||
+    typeof navigator === "undefined" ||
+    !navigator.clipboard?.write ||
+    typeof ClipboardItem === "undefined"
+  ) {
     uiToast("瀏覽器不支援剪貼簿寫入", 3000);
     return false;
   }

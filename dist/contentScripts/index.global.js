@@ -3990,7 +3990,7 @@
   async function copyTextToClipboard(text) {
     if (!text) return false;
     try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
         await navigator.clipboard.writeText(text);
         return true;
       }
@@ -4067,7 +4067,7 @@
         imgUrlOrBlob = rasterToDataUrl(window.__letMeSeeSeeActiveRaster);
       }
     }
-    if (!imgUrlOrBlob || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    if (!imgUrlOrBlob || typeof navigator === "undefined" || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
       uiToast("\u700F\u89BD\u5668\u4E0D\u652F\u63F4\u526A\u8CBC\u7C3F\u5BEB\u5165", 3e3);
       return false;
     }

@@ -3,9 +3,10 @@
   "version": "0.2.0",
   "description": "View, zoom, copy, and download images in Google Docs, Sheets, and Slides.",
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "node --test tests/extension.test.js",
     "check-syntax": "node -c dist/contentScripts/index.global.js && node -c dist/offscreen/offscreen.js && node -c dist/background/index.mjs",
-    "build:zip": "zip -r let-me-see-see-v0.2.0.zip manifest.json assets dist README.md -x '*.DS_Store'"
+    "build:zip": "npm run build && zip -r let-me-see-see-v0.2.0.zip manifest.json assets dist README.md -x '*.DS_Store'"
   },
   "keywords": [
     "chrome-extension",
@@ -15,5 +16,8 @@
     "image-zoom"
   ],
   "author": "Mark Lee",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
 }

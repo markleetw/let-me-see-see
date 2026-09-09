@@ -3885,6 +3885,36 @@
     val = val.replace(/兩中([圓漫步曲景情風])/g, "\u96E8\u4E2D$1");
     val = val.replace(/([防避淋梅暴陣雷下落細微大晴])兩/g, "$1\u96E8");
     val = val.replace(/兩([滴勢季量水停])/g, "\u96E8$1");
+    val = val.replace(/[已己]經/g, "\u5DF2\u7D93");
+    val = val.replace(/自[已己]/g, "\u81EA\u5DF1");
+    val = val.replace(/早[已己]/g, "\u65E9\u5DF2");
+    val = val.replace(/知[已己]/g, "\u77E5\u5DF1");
+    val = val.replace(/週[未末]/g, "\u9031\u672B");
+    val = val.replace(/期[未末]/g, "\u671F\u672B");
+    val = val.replace(/年[未末]/g, "\u5E74\u672B");
+    val = val.replace(/月[未末]/g, "\u6708\u672B");
+    val = val.replace(/[未末]日/g, "\u672B\u65E5");
+    val = val.replace(/[未末]尾/g, "\u672B\u5C3E");
+    val = val.replace(/[未末]來/g, "\u672A\u4F86");
+    val = val.replace(/尚[未末]/g, "\u5C1A\u672A");
+    val = val.replace(/從[未末]/g, "\u5F9E\u672A");
+    val = val.replace(/[未末]必/g, "\u672A\u5FC5");
+    val = val.replace(/[未末]知/g, "\u672A\u77E5");
+    val = val.replace(/[折拆]扣/g, "\u6298\u6263");
+    val = val.replace(/打[折拆]/g, "\u6253\u6298");
+    val = val.replace(/[折拆]除/g, "\u62C6\u9664");
+    val = val.replace(/[折拆]封/g, "\u62C6\u5C01");
+    val = val.replace(/[折拆]開/g, "\u62C6\u958B");
+    val = val.replace(/女[士土]/g, "\u5973\u58EB");
+    val = val.replace(/紳[士土]/g, "\u7D33\u58EB");
+    val = val.replace(/碩[士土]/g, "\u78A9\u58EB");
+    val = val.replace(/博[士土]/g, "\u535A\u58EB");
+    val = val.replace(/泥[士土]/g, "\u6CE5\u571F");
+    val = val.replace(/[士土]地/g, "\u571F\u5730");
+    val = val.replace(/[烏鳥]雲/g, "\u70CF\u96F2");
+    val = val.replace(/[烏鳥]龍/g, "\u70CF\u9F8D");
+    val = val.replace(/小[烏鳥]/g, "\u5C0F\u9CE5");
+    val = val.replace(/候[烏鳥]/g, "\u5019\u9CE5");
     return val;
   }
 

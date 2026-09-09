@@ -54,6 +54,24 @@ test("Unit: OCR Text Cleaner & ReDoS Guard", async (t) => {
     assert.strictEqual(disambiguateCjkCharacters("防兩外套"), "防雨外套");
     assert.strictEqual(disambiguateCjkCharacters("梅兩季節"), "梅雨季節");
     assert.strictEqual(disambiguateCjkCharacters("兩勢漸增"), "雨勢漸增");
+    // 已 vs 己
+    assert.strictEqual(disambiguateCjkCharacters("己經完成"), "已經完成");
+    assert.strictEqual(disambiguateCjkCharacters("自已處理"), "自己處理");
+    // 未 vs 末
+    assert.strictEqual(disambiguateCjkCharacters("週未愉快"), "週末愉快");
+    assert.strictEqual(disambiguateCjkCharacters("期未考"), "期末考");
+    assert.strictEqual(disambiguateCjkCharacters("末來發展"), "未來發展");
+    assert.strictEqual(disambiguateCjkCharacters("尚末開始"), "尚未開始");
+    // 折 vs 拆
+    assert.strictEqual(disambiguateCjkCharacters("全館打拆"), "全館打折");
+    assert.strictEqual(disambiguateCjkCharacters("限時拆扣"), "限時折扣");
+    assert.strictEqual(disambiguateCjkCharacters("折除包裝"), "拆除包裝");
+    // 士 vs 土
+    assert.strictEqual(disambiguateCjkCharacters("女士優先"), "女士優先");
+    assert.strictEqual(disambiguateCjkCharacters("士地重劃"), "土地重劃");
+    // 烏 vs 鳥
+    assert.strictEqual(disambiguateCjkCharacters("天邊鳥雲"), "天邊烏雲");
+    assert.strictEqual(disambiguateCjkCharacters("樹上小烏"), "樹上小鳥");
   });
 
   await t.test("Performance & ReDoS Guard: 50,000 characters process in under 200ms (ReDoS free)", () => {

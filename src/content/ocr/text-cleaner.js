@@ -207,5 +207,45 @@ export function disambiguateCjkCharacters(text) {
   // e.g. "兩滴", "兩勢", "兩季", "兩量", "兩水", "兩停"
   val = val.replace(/兩([滴勢季量水停])/g, "雨$1");
 
+  // 3. Fix '已' vs '己' (e.g. 已經, 自己, 早已, 知己)
+  val = val.replace(/[已己]經/g, "已經");
+  val = val.replace(/自[已己]/g, "自己");
+  val = val.replace(/早[已己]/g, "早已");
+  val = val.replace(/知[已己]/g, "知己");
+
+  // 4. Fix '未' vs '末' (e.g. 週末, 期末, 年末, 月末, 未來, 尚未, 從未, 未必, 未知)
+  val = val.replace(/週[未末]/g, "週末");
+  val = val.replace(/期[未末]/g, "期末");
+  val = val.replace(/年[未末]/g, "年末");
+  val = val.replace(/月[未末]/g, "月末");
+  val = val.replace(/[未末]日/g, "末日");
+  val = val.replace(/[未末]尾/g, "末尾");
+  val = val.replace(/[未末]來/g, "未來");
+  val = val.replace(/尚[未末]/g, "尚未");
+  val = val.replace(/從[未末]/g, "從未");
+  val = val.replace(/[未末]必/g, "未必");
+  val = val.replace(/[未末]知/g, "未知");
+
+  // 5. Fix '折' vs '拆' (e.g. 折扣, 打折, 拆除, 拆封, 拆開)
+  val = val.replace(/[折拆]扣/g, "折扣");
+  val = val.replace(/打[折拆]/g, "打折");
+  val = val.replace(/[折拆]除/g, "拆除");
+  val = val.replace(/[折拆]封/g, "拆封");
+  val = val.replace(/[折拆]開/g, "拆開");
+
+  // 6. Fix '士' vs '土' (e.g. 女士, 紳士, 碩士, 博士, 土地, 泥土)
+  val = val.replace(/女[士土]/g, "女士");
+  val = val.replace(/紳[士土]/g, "紳士");
+  val = val.replace(/碩[士土]/g, "碩士");
+  val = val.replace(/博[士土]/g, "博士");
+  val = val.replace(/泥[士土]/g, "泥土");
+  val = val.replace(/[士土]地/g, "土地");
+
+  // 7. Fix '烏' vs '鳥' (e.g. 烏雲, 烏龍, 小鳥, 候鳥)
+  val = val.replace(/[烏鳥]雲/g, "烏雲");
+  val = val.replace(/[烏鳥]龍/g, "烏龍");
+  val = val.replace(/小[烏鳥]/g, "小鳥");
+  val = val.replace(/候[烏鳥]/g, "候鳥");
+
   return val;
 }

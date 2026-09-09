@@ -3741,7 +3741,10 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 6e4);
+    const timer = window.setTimeout(() => URL.revokeObjectURL(url), 6e4);
+    if (timer && typeof timer.unref === "function") {
+      timer.unref();
+    }
   }
   async function fetchImageBlobWithRetry(url, retries = 2) {
     let lastError = null;
@@ -4386,9 +4389,22 @@
   };
   var DOCSUBIPK_REGEX = /^https:\/\/[^/]+\.googleusercontent\.com\/docsubipk\//;
   var HIGH_RES_SIZE_SUFFIX = "=s2048";
+  function isUserAvatarUrl(url) {
+    if (!url || typeof url !== "string") return false;
+    return /\/(?:a|a-|ogw|account|user|profile)\/[A-Za-z0-9_-]+/i.test(url) || url.includes("googleusercontent.com/a/") || url.includes("googleusercontent.com/a-/") || url.includes("googleusercontent.com/ogw/");
+  }
   function getBaseImageUrl(url) {
     if (!url || typeof url !== "string") return "";
-    return url.replace(/=[^/=]*$/, "");
+    try {
+      const parsed = new URL(url);
+      const cleanPath = parsed.pathname.replace(/=[^/=]*$/, "");
+      if (parsed.hostname.endsWith(".googleusercontent.com")) {
+        return `https://googleusercontent.com${cleanPath}`;
+      }
+      return `${parsed.origin}${cleanPath}`;
+    } catch {
+      return url.replace(/=[^/=]*$/, "");
+    }
   }
   function upgradeToHighResUrl(url) {
     if (!url || typeof url !== "string") return url;
@@ -4407,7 +4423,9 @@
   function registerImageUrl(url) {
     if (!url || typeof url !== "string") return;
     const trimmed = url.trim();
-    if (!trimmed || trimmed.startsWith("data:") || trimmed.includes("gstatic.com")) return;
+    if (!trimmed || trimmed.startsWith("data:") || trimmed.includes("gstatic.com") || isUserAvatarUrl(trimmed)) {
+      return;
+    }
     const baseKey = getBaseImageUrl(trimmed);
     const isHighRes = /=s(?:1024|1600|2048|4096)(?:$|[&#?])/.test(trimmed);
     if (!cumulativeDiscoveredImages.has(baseKey)) {
@@ -4464,9 +4482,10 @@
     }
     if (typeof document !== "undefined") {
       try {
-        document.querySelectorAll("image, img").forEach((el) => {
+        const selector = docType === "presentation" ? "#workspace-container image, .punch-viewer-content image, .punch-filmstrip-thumbnail image" : "svg.kix-embeddedobject-image image, .kix-page image, .waffle-borderless-embedded-object-container img";
+        document.querySelectorAll(selector).forEach((el) => {
           const src = el.getAttribute("href") || el.getAttribute("xlink:href") || el.getAttribute("src");
-          if (src && !src.startsWith("data:") && !src.includes("gstatic.com")) {
+          if (src && !src.startsWith("data:") && !src.includes("gstatic.com") && !isUserAvatarUrl(src)) {
             registerImageUrl(src);
           }
         });
@@ -4478,11 +4497,11 @@
       if (pattern && baseKey.includes(pattern)) {
         candidates.set(baseKey, item.url);
       } else if (docType === "spreadsheets") {
-        if (DOCSUBIPK_REGEX.test(baseKey) || baseKey.includes("googleusercontent.com")) {
+        if (DOCSUBIPK_REGEX.test(baseKey) || baseKey.includes("googleusercontent.com") && !isUserAvatarUrl(baseKey)) {
           candidates.set(baseKey, item.url);
         }
       } else if (docType === "presentation") {
-        if (baseKey.includes("googleusercontent.com") || baseKey.includes("slides-images-rt")) {
+        if (baseKey.includes("slides-images-rt") || baseKey.includes("googleusercontent.com") && !isUserAvatarUrl(baseKey)) {
           candidates.set(baseKey, item.url);
         }
       }

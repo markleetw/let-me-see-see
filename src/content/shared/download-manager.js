@@ -40,7 +40,10 @@ export function triggerBlobDownload(blob, filename) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+  const timer = window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+  if (timer && typeof timer.unref === "function") {
+    timer.unref();
+  }
 }
 
 export async function fetchImageBlobWithRetry(url, retries = 2) {

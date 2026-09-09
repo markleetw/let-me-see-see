@@ -7,18 +7,23 @@ import {
 } from "../../src/content/shared/network-resources.js";
 
 test("Unit: Network Resource Interceptor & Image Stability", async (t) => {
-  await t.test("getBaseImageUrl: cleanly strips size and dimension parameters", () => {
+  await t.test("getBaseImageUrl: cleanly strips size parameters and canonicalizes Google CDN subdomains", () => {
     const raw = "https://lh3.googleusercontent.com/docs-images-rt/AO484y_ABC123=s600";
     assert.strictEqual(
       getBaseImageUrl(raw),
-      "https://lh3.googleusercontent.com/docs-images-rt/AO484y_ABC123"
+      "https://googleusercontent.com/docs-images-rt/AO484y_ABC123"
     );
 
     const complex = "https://lh3.googleusercontent.com/docs-images-rt/AO484y_DEF456=w1024-h768-p-k-no-nu";
     assert.strictEqual(
       getBaseImageUrl(complex),
-      "https://lh3.googleusercontent.com/docs-images-rt/AO484y_DEF456"
+      "https://googleusercontent.com/docs-images-rt/AO484y_DEF456"
     );
+
+    // Subdomain sharding: lh3 and lh4-rt must collapse into the same canonical key
+    const sharded1 = "https://lh3.googleusercontent.com/docs-images-rt/IMG_COMMON=s400";
+    const sharded2 = "https://lh4-rt.googleusercontent.com/docs-images-rt/IMG_COMMON=s2048";
+    assert.strictEqual(getBaseImageUrl(sharded1), getBaseImageUrl(sharded2));
   });
 
   await t.test("upgradeToHighResUrl: upgrades preview sizes to =s2048", () => {

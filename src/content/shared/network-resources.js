@@ -15,9 +15,29 @@ const DOC_PATH_PATTERNS = {
 const DOCSUBIPK_REGEX = /^https:\/\/[^/]+\.googleusercontent\.com\/docsubipk\//;
 const HIGH_RES_SIZE_SUFFIX = "=s2048";
 
+export function isUserAvatarUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  return (
+    /\/(?:a|a-|ogw|account|user|profile)\/[A-Za-z0-9_-]+/i.test(url) ||
+    url.includes("googleusercontent.com/a/") ||
+    url.includes("googleusercontent.com/a-/") ||
+    url.includes("googleusercontent.com/ogw/")
+  );
+}
+
 export function getBaseImageUrl(url) {
   if (!url || typeof url !== "string") return "";
-  return url.replace(/=[^/=]*$/, "");
+  try {
+    const parsed = new URL(url);
+    const cleanPath = parsed.pathname.replace(/=[^/=]*$/, "");
+    // Canonicalize Google CDN subdomains (lh3, lh4, lh5, lh6, lh3-rt) to a unified origin
+    if (parsed.hostname.endsWith(".googleusercontent.com")) {
+      return `https://googleusercontent.com${cleanPath}`;
+    }
+    return `${parsed.origin}${cleanPath}`;
+  } catch {
+    return url.replace(/=[^/=]*$/, "");
+  }
 }
 
 export function upgradeToHighResUrl(url) {
@@ -40,7 +60,14 @@ const cumulativeDiscoveredImages = new Map();
 export function registerImageUrl(url) {
   if (!url || typeof url !== "string") return;
   const trimmed = url.trim();
-  if (!trimmed || trimmed.startsWith("data:") || trimmed.includes("gstatic.com")) return;
+  if (
+    !trimmed ||
+    trimmed.startsWith("data:") ||
+    trimmed.includes("gstatic.com") ||
+    isUserAvatarUrl(trimmed)
+  ) {
+    return;
+  }
 
   const baseKey = getBaseImageUrl(trimmed);
   const isHighRes = /=s(?:1024|1600|2048|4096)(?:$|[&#?])/.test(trimmed);
@@ -108,12 +135,16 @@ export function getNetworkResourceUrls(
     }
   }
 
-  // 2. Scan DOM for image elements (Slides SVG <image>, Docs embedded images, etc.)
+  // 2. Scan DOM for image elements strictly in document workspace (avoiding headers and user avatars)
   if (typeof document !== "undefined") {
     try {
-      document.querySelectorAll("image, img").forEach((el) => {
+      const selector = docType === "presentation"
+        ? "#workspace-container image, .punch-viewer-content image, .punch-filmstrip-thumbnail image"
+        : "svg.kix-embeddedobject-image image, .kix-page image, .waffle-borderless-embedded-object-container img";
+
+      document.querySelectorAll(selector).forEach((el) => {
         const src = el.getAttribute("href") || el.getAttribute("xlink:href") || el.getAttribute("src");
-        if (src && !src.startsWith("data:") && !src.includes("gstatic.com")) {
+        if (src && !src.startsWith("data:") && !src.includes("gstatic.com") && !isUserAvatarUrl(src)) {
           registerImageUrl(src);
         }
       });
@@ -127,11 +158,11 @@ export function getNetworkResourceUrls(
     if (pattern && baseKey.includes(pattern)) {
       candidates.set(baseKey, item.url);
     } else if (docType === "spreadsheets") {
-      if (DOCSUBIPK_REGEX.test(baseKey) || baseKey.includes("googleusercontent.com")) {
+      if (DOCSUBIPK_REGEX.test(baseKey) || (baseKey.includes("googleusercontent.com") && !isUserAvatarUrl(baseKey))) {
         candidates.set(baseKey, item.url);
       }
     } else if (docType === "presentation") {
-      if (baseKey.includes("googleusercontent.com") || baseKey.includes("slides-images-rt")) {
+      if (baseKey.includes("slides-images-rt") || (baseKey.includes("googleusercontent.com") && !isUserAvatarUrl(baseKey))) {
         candidates.set(baseKey, item.url);
       }
     }

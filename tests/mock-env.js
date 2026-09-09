@@ -195,9 +195,17 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
     removeEventListener(type, fn) {
       if (listeners.win[type]) listeners.win[type] = listeners.win[type].filter(f => f !== fn);
     },
-    setTimeout(fn, ms) { return setTimeout(fn, ms); },
+    setTimeout(fn, ms) {
+      const t = setTimeout(fn, ms);
+      if (t && typeof t.unref === "function") t.unref();
+      return t;
+    },
     clearTimeout(id) { clearTimeout(id); },
-    requestAnimationFrame(cb) { return setTimeout(cb, 16); },
+    requestAnimationFrame(cb) {
+      const t = setTimeout(cb, 16);
+      if (t && typeof t.unref === "function") t.unref();
+      return t;
+    },
     cancelAnimationFrame(id) { clearTimeout(id); },
     navigator: {
       userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -355,11 +363,19 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
     performance: { now: () => Date.now(), getEntriesByType: () => [] },
     PerformanceObserver: class PerformanceObserver { observe() {} disconnect() {} },
     MutationObserver: class MutationObserver { constructor(cb) { this.cb = cb; } observe() {} disconnect() {} },
-    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    setTimeout: (fn, ms) => {
+      const t = setTimeout(fn, ms);
+      if (t && typeof t.unref === "function") t.unref();
+      return t;
+    },
     clearTimeout: (id) => clearTimeout(id),
     setImmediate: (fn, ...args) => setImmediate(fn, ...args),
     clearImmediate: (id) => clearImmediate(id),
-    requestAnimationFrame: (cb) => setTimeout(cb, 16),
+    requestAnimationFrame: (cb) => {
+      const t = setTimeout(cb, 16);
+      if (t && typeof t.unref === "function") t.unref();
+      return t;
+    },
     cancelAnimationFrame: (id) => clearTimeout(id)
   };
 

@@ -3733,6 +3733,7 @@
     return ext ? ext.toLowerCase() : "png";
   }
   function triggerBlobDownload(blob, filename) {
+    if (typeof document === "undefined") return;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -3742,10 +3743,40 @@
     a.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1e3);
   }
+  async function fetchImageBlobWithRetry(url, retries = 2) {
+    let lastError = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          return await res.blob();
+        }
+        if (res.status === 404) {
+          lastError = new Error(`HTTP 404 for ${url}`);
+          break;
+        }
+        lastError = new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        lastError = err;
+      }
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+      }
+    }
+    const fallbackUrl = url.replace(/=s2048(?:$|[&#?])/, "");
+    if (fallbackUrl && fallbackUrl !== url) {
+      try {
+        const res = await fetch(fallbackUrl);
+        if (res.ok) {
+          return await res.blob();
+        }
+      } catch {
+      }
+    }
+    throw lastError || new Error(`Failed to fetch ${url}`);
+  }
   async function fetchImageBlob(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(String(res.status));
-    return res.blob();
+    return fetchImageBlobWithRetry(url, 1);
   }
   async function convertUrlToPngBlob(url) {
     const blob = await fetchImageBlob(url);
@@ -3806,15 +3837,17 @@
     }
     uiToast(`\u6B63\u5728\u6253\u5305\u4E0B\u8F09\u5168\u6587\u4EF6\u5716\u7247 (0/${urls.length})...`, 0);
     const blobs = Array.from({ length: urls.length }, () => null);
+    const failedItems = [];
     let currentIndex = 0;
     let doneCount = 0;
     const worker = async () => {
       while (currentIndex < urls.length) {
         const idx = currentIndex++;
         try {
-          blobs[idx] = await fetchImageBlob(urls[idx]);
-        } catch {
+          blobs[idx] = await fetchImageBlobWithRetry(urls[idx]);
+        } catch (err) {
           blobs[idx] = null;
+          failedItems.push({ index: idx + 1, url: urls[idx], error: err?.message || String(err) });
         }
         doneCount++;
         uiToast(`\u6B63\u5728\u6253\u5305\u4E0B\u8F09\u5168\u6587\u4EF6\u5716\u7247 (${doneCount}/${urls.length})...`, 0);
@@ -3838,6 +3871,20 @@
       zip.file(`image-${numStr}.${getImageExtension(blob, urls[idx])}`, blob);
     });
     const failedCount = urls.length - successCount;
+    if (failedItems.length > 0) {
+      const reportText = [
+        `Let Me See See - \u6253\u5305\u4E0B\u8F09\u5831\u544A`,
+        `==============================`,
+        `\u6587\u4EF6\u540D\u7A31: ${sanitizeFilename()}`,
+        `\u6383\u63CF\u7E3D\u8A08: ${urls.length} \u5F35`,
+        `\u6210\u529F\u4E0B\u8F09: ${successCount} \u5F35`,
+        `\u4E0B\u8F09\u5931\u6557: ${failedItems.length} \u5F35`,
+        ``,
+        `\u5931\u6557\u6E05\u55AE:`,
+        ...failedItems.map((f) => `#${f.index}: ${f.url} (${f.error})`)
+      ].join("\n");
+      zip.file("_download_report.txt", reportText);
+    }
     if (successCount > 0) {
       uiToast("\u6B63\u5728\u7522\u751F ZIP \u58D3\u7E2E\u6A94...", 0);
       const zipBlob = await zip.generateAsync({
@@ -3846,10 +3893,11 @@
         compressionOptions: { level: 6 }
       });
       triggerBlobDownload(zipBlob, `${sanitizeFilename()}-images.zip`);
-      uiToast(
-        `\u4E0B\u8F09\u6210\u529F\uFF01\u5171\u6253\u5305 ${successCount} \u5F35\u5716\u7247${failedCount > 0 ? `\uFF08${failedCount} \u5F35\u5931\u6557\uFF09` : ""}`,
-        3500
-      );
+      if (failedCount > 0) {
+        uiToast(`\u4E0B\u8F09\u5B8C\u6210\uFF01\u5171\u6253\u5305 ${successCount} \u5F35\u5716\u7247\uFF08${failedCount} \u5F35\u5931\u6557\uFF0C\u5DF2\u8A18\u65BC ZIP \u5831\u544A\uFF09`, 4500);
+      } else {
+        uiToast(`\u4E0B\u8F09\u6210\u529F\uFF01\u5171\u6253\u5305 ${successCount} \u5F35\u5716\u7247`, 3500);
+      }
     } else {
       uiToast("\u6253\u5305\u5931\u6557\uFF1A\u7121\u6CD5\u4E0B\u8F09\u5716\u7247", 3e3);
     }
@@ -4343,47 +4391,131 @@
   };
   var DOCSUBIPK_REGEX = /^https:\/\/[^/]+\.googleusercontent\.com\/docsubipk\//;
   var HIGH_RES_SIZE_SUFFIX = "=s2048";
+  function getBaseImageUrl(url) {
+    if (!url || typeof url !== "string") return "";
+    return url.replace(/=[^/=]*$/, "");
+  }
   function upgradeToHighResUrl(url) {
-    return `${url.replace(/=[^/=]*$/, "")}${HIGH_RES_SIZE_SUFFIX}`;
+    if (!url || typeof url !== "string") return url;
+    if (/=[^/=]*$/.test(url)) {
+      return `${url.replace(/=[^/=]*$/, "")}${HIGH_RES_SIZE_SUFFIX}`;
+    }
+    if (url.includes("googleusercontent.com")) {
+      return `${url}${HIGH_RES_SIZE_SUFFIX}`;
+    }
+    return url;
   }
   function deduplicate(arr) {
     return [...new Set(arr)];
   }
+  var cumulativeDiscoveredImages = /* @__PURE__ */ new Map();
+  function registerImageUrl(url) {
+    if (!url || typeof url !== "string") return;
+    const trimmed = url.trim();
+    if (!trimmed || trimmed.startsWith("data:") || trimmed.includes("gstatic.com")) return;
+    const baseKey = getBaseImageUrl(trimmed);
+    const isHighRes = /=s(?:1024|1600|2048|4096)(?:$|[&#?])/.test(trimmed);
+    if (!cumulativeDiscoveredImages.has(baseKey)) {
+      cumulativeDiscoveredImages.set(baseKey, {
+        url: isHighRes ? trimmed : upgradeToHighResUrl(trimmed),
+        rawUrl: trimmed,
+        isHighRes
+      });
+    } else {
+      const existing = cumulativeDiscoveredImages.get(baseKey);
+      if (!existing.isHighRes && isHighRes) {
+        cumulativeDiscoveredImages.set(baseKey, {
+          url: trimmed,
+          rawUrl: trimmed,
+          isHighRes: true
+        });
+      }
+    }
+  }
+  var observerInitialized = false;
+  function initResourceObserver() {
+    if (observerInitialized) return;
+    observerInitialized = true;
+    if (typeof performance !== "undefined") {
+      if (typeof performance.setResourceTimingBufferSize === "function") {
+        try {
+          performance.setResourceTimingBufferSize(1e4);
+        } catch {
+        }
+      }
+      if (typeof PerformanceObserver !== "undefined") {
+        try {
+          const observer = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+              if (entry.name) registerImageUrl(entry.name);
+            }
+          });
+          observer.observe({ entryTypes: ["resource"] });
+        } catch {
+        }
+      }
+    }
+  }
   function getNetworkResourceUrls(docType, entries = typeof performance !== "undefined" && typeof performance.getEntriesByType === "function" ? performance.getEntriesByType("resource") : []) {
+    initResourceObserver();
     const pattern = DOC_PATH_PATTERNS[docType];
     const allUrls = deduplicate(entries.map((e) => typeof e === "string" ? e : e.name));
-    const matching = allUrls.filter((u) => pattern && u.includes(pattern));
-    const highResCandidates = matching.filter((u) => /=s(?:1024|1600|2048|4096)(?:$|[&#?])/.test(u));
-    const base = highResCandidates.length ? highResCandidates : matching;
-    const domUrls = [];
+    for (const u of allUrls) {
+      if (pattern && u.includes(pattern)) {
+        registerImageUrl(u);
+      } else if (docType === "spreadsheets" && (DOCSUBIPK_REGEX.test(u) || u.includes("googleusercontent.com"))) {
+        registerImageUrl(u);
+      }
+    }
     if (typeof document !== "undefined") {
       try {
         document.querySelectorAll("image, img").forEach((el) => {
           const src = el.getAttribute("href") || el.getAttribute("xlink:href") || el.getAttribute("src");
           if (src && !src.startsWith("data:") && !src.includes("gstatic.com")) {
-            domUrls.push(src);
+            registerImageUrl(src);
           }
         });
       } catch {
       }
     }
-    if (docType !== "spreadsheets") {
-      return deduplicate([...base, ...domUrls]);
+    const candidates = /* @__PURE__ */ new Map();
+    for (const [baseKey, item] of cumulativeDiscoveredImages.entries()) {
+      if (pattern && baseKey.includes(pattern)) {
+        candidates.set(baseKey, item.url);
+      } else if (docType === "spreadsheets") {
+        if (DOCSUBIPK_REGEX.test(baseKey) || baseKey.includes("googleusercontent.com")) {
+          candidates.set(baseKey, item.url);
+        }
+      } else if (docType === "presentation") {
+        if (baseKey.includes("googleusercontent.com") || baseKey.includes("slides-images-rt")) {
+          candidates.set(baseKey, item.url);
+        }
+      }
     }
-    const docsubipk = deduplicate(allUrls.filter((u) => DOCSUBIPK_REGEX.test(u)).map(upgradeToHighResUrl));
-    const imageExts = deduplicate(
-      allUrls.filter((u) => {
+    if (candidates.size === 0) {
+      for (const u of allUrls) {
+        if (pattern && u.includes(pattern)) {
+          candidates.set(getBaseImageUrl(u), u);
+        }
+      }
+    }
+    const extraUrls = [];
+    if (docType === "spreadsheets") {
+      const docsubipk = allUrls.filter((u) => DOCSUBIPK_REGEX.test(u)).map(upgradeToHighResUrl);
+      extraUrls.push(...docsubipk);
+      for (const u of allUrls) {
         try {
           const parsed = new URL(u);
-          return (/\.(png|jpe?g|webp|gif|svg|avif)($|[?#])/i.test(parsed.pathname) || u.includes("googleusercontent.com")) && !/(^|\.)(gstatic\.com)$/.test(parsed.hostname);
+          if ((/\.(png|jpe?g|webp|gif|svg|avif)($|[?#])/i.test(parsed.pathname) || u.includes("googleusercontent.com")) && !/(^|\.)(gstatic\.com)$/.test(parsed.hostname)) {
+            extraUrls.push(u);
+          }
         } catch {
-          return false;
         }
-      })
-    );
-    const formulaUrl = extractFormulaBarImageUrl();
-    const formulaList = formulaUrl ? [formulaUrl] : [];
-    return deduplicate([...base, ...docsubipk, ...imageExts, ...formulaList, ...domUrls]);
+      }
+      const formulaUrl = extractFormulaBarImageUrl();
+      if (formulaUrl) extraUrls.push(formulaUrl);
+    }
+    return deduplicate([...Array.from(candidates.values()), ...extraUrls]);
   }
   function getFormatFromMime(mimeType, url) {
     const map = {

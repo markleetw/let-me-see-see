@@ -15,55 +15,160 @@ const DOC_PATH_PATTERNS = {
 const DOCSUBIPK_REGEX = /^https:\/\/[^/]+\.googleusercontent\.com\/docsubipk\//;
 const HIGH_RES_SIZE_SUFFIX = "=s2048";
 
+export function getBaseImageUrl(url) {
+  if (!url || typeof url !== "string") return "";
+  return url.replace(/=[^/=]*$/, "");
+}
+
 export function upgradeToHighResUrl(url) {
-  return `${url.replace(/=[^/=]*$/, "")}${HIGH_RES_SIZE_SUFFIX}`;
+  if (!url || typeof url !== "string") return url;
+  if (/=[^/=]*$/.test(url)) {
+    return `${url.replace(/=[^/=]*$/, "")}${HIGH_RES_SIZE_SUFFIX}`;
+  }
+  if (url.includes("googleusercontent.com")) {
+    return `${url}${HIGH_RES_SIZE_SUFFIX}`;
+  }
+  return url;
 }
 
 export function deduplicate(arr) {
   return [...new Set(arr)];
 }
 
-export function getNetworkResourceUrls(docType, entries = (typeof performance !== "undefined" && typeof performance.getEntriesByType === "function" ? performance.getEntriesByType("resource") : [])) {
+const cumulativeDiscoveredImages = new Map();
+
+export function registerImageUrl(url) {
+  if (!url || typeof url !== "string") return;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("data:") || trimmed.includes("gstatic.com")) return;
+
+  const baseKey = getBaseImageUrl(trimmed);
+  const isHighRes = /=s(?:1024|1600|2048|4096)(?:$|[&#?])/.test(trimmed);
+
+  if (!cumulativeDiscoveredImages.has(baseKey)) {
+    cumulativeDiscoveredImages.set(baseKey, {
+      url: isHighRes ? trimmed : upgradeToHighResUrl(trimmed),
+      rawUrl: trimmed,
+      isHighRes
+    });
+  } else {
+    const existing = cumulativeDiscoveredImages.get(baseKey);
+    if (!existing.isHighRes && isHighRes) {
+      cumulativeDiscoveredImages.set(baseKey, {
+        url: trimmed,
+        rawUrl: trimmed,
+        isHighRes: true
+      });
+    }
+  }
+}
+
+let observerInitialized = false;
+export function initResourceObserver() {
+  if (observerInitialized) return;
+  observerInitialized = true;
+
+  if (typeof performance !== "undefined") {
+    if (typeof performance.setResourceTimingBufferSize === "function") {
+      try {
+        performance.setResourceTimingBufferSize(10000);
+      } catch {}
+    }
+
+    if (typeof PerformanceObserver !== "undefined") {
+      try {
+        const observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (entry.name) registerImageUrl(entry.name);
+          }
+        });
+        observer.observe({ entryTypes: ["resource"] });
+      } catch {}
+    }
+  }
+}
+
+export function getNetworkResourceUrls(
+  docType,
+  entries = typeof performance !== "undefined" && typeof performance.getEntriesByType === "function"
+    ? performance.getEntriesByType("resource")
+    : []
+) {
+  initResourceObserver();
+
   const pattern = DOC_PATH_PATTERNS[docType];
   const allUrls = deduplicate(entries.map((e) => (typeof e === "string" ? e : e.name)));
-  const matching = allUrls.filter((u) => pattern && u.includes(pattern));
-  const highResCandidates = matching.filter((u) => /=s(?:1024|1600|2048|4096)(?:$|[&#?])/.test(u));
-  const base = highResCandidates.length ? highResCandidates : matching;
 
-  const domUrls = [];
+  // 1. Ingest all current entries into cumulative registry
+  for (const u of allUrls) {
+    if (pattern && u.includes(pattern)) {
+      registerImageUrl(u);
+    } else if (docType === "spreadsheets" && (DOCSUBIPK_REGEX.test(u) || u.includes("googleusercontent.com"))) {
+      registerImageUrl(u);
+    }
+  }
+
+  // 2. Scan DOM for image elements (Slides SVG <image>, Docs embedded images, etc.)
   if (typeof document !== "undefined") {
     try {
       document.querySelectorAll("image, img").forEach((el) => {
         const src = el.getAttribute("href") || el.getAttribute("xlink:href") || el.getAttribute("src");
         if (src && !src.startsWith("data:") && !src.includes("gstatic.com")) {
-          domUrls.push(src);
+          registerImageUrl(src);
         }
       });
     } catch {}
   }
 
-  if (docType !== "spreadsheets") {
-    return deduplicate([...base, ...domUrls]);
+  // 3. Collect matching canonical images for current docType
+  const candidates = new Map();
+
+  for (const [baseKey, item] of cumulativeDiscoveredImages.entries()) {
+    if (pattern && baseKey.includes(pattern)) {
+      candidates.set(baseKey, item.url);
+    } else if (docType === "spreadsheets") {
+      if (DOCSUBIPK_REGEX.test(baseKey) || baseKey.includes("googleusercontent.com")) {
+        candidates.set(baseKey, item.url);
+      }
+    } else if (docType === "presentation") {
+      if (baseKey.includes("googleusercontent.com") || baseKey.includes("slides-images-rt")) {
+        candidates.set(baseKey, item.url);
+      }
+    }
   }
 
-  const docsubipk = deduplicate(allUrls.filter((u) => DOCSUBIPK_REGEX.test(u)).map(upgradeToHighResUrl));
-  const imageExts = deduplicate(
-    allUrls.filter((u) => {
+  // Fallback for mock test environments where cumulative registry might not have matching keys
+  if (candidates.size === 0) {
+    for (const u of allUrls) {
+      if (pattern && u.includes(pattern)) {
+        candidates.set(getBaseImageUrl(u), u);
+      }
+    }
+  }
+
+  // 4. Spreadsheets: Include formula bar and direct image extension URLs
+  const extraUrls = [];
+  if (docType === "spreadsheets") {
+    const docsubipk = allUrls.filter((u) => DOCSUBIPK_REGEX.test(u)).map(upgradeToHighResUrl);
+    extraUrls.push(...docsubipk);
+
+    for (const u of allUrls) {
       try {
         const parsed = new URL(u);
-        return (
+        if (
           (/\.(png|jpe?g|webp|gif|svg|avif)($|[?#])/i.test(parsed.pathname) || u.includes("googleusercontent.com")) &&
           !/(^|\.)(gstatic\.com)$/.test(parsed.hostname)
-        );
-      } catch {
-        return false;
-      }
-    })
-  );
+        ) {
+          extraUrls.push(u);
+        }
+      } catch {}
+    }
 
-  const formulaUrl = extractFormulaBarImageUrl();
-  const formulaList = formulaUrl ? [formulaUrl] : [];
-  return deduplicate([...base, ...docsubipk, ...imageExts, ...formulaList, ...domUrls]);
+    const formulaUrl = extractFormulaBarImageUrl();
+    if (formulaUrl) extraUrls.push(formulaUrl);
+  }
+
+  return deduplicate([...Array.from(candidates.values()), ...extraUrls]);
 }
 
 export function getFormatFromMime(mimeType, url) {

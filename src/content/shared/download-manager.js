@@ -32,6 +32,7 @@ export function getImageExtension(blob, url) {
 }
 
 export function triggerBlobDownload(blob, filename) {
+  if (typeof document === "undefined") return;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -42,10 +43,45 @@ export function triggerBlobDownload(blob, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+export async function fetchImageBlobWithRetry(url, retries = 2) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        return await res.blob();
+      }
+      if (res.status === 404) {
+        lastError = new Error(`HTTP 404 for ${url}`);
+        break;
+      }
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+
+    if (attempt < retries) {
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+    }
+  }
+
+  // Fallback: If URL was upgraded to =s2048 and failed, try the un-upgraded original URL
+  const fallbackUrl = url.replace(/=s2048(?:$|[&#?])/, "");
+  if (fallbackUrl && fallbackUrl !== url) {
+    try {
+      const res = await fetch(fallbackUrl);
+      if (res.ok) {
+        return await res.blob();
+      }
+    } catch {}
+  }
+
+  throw lastError || new Error(`Failed to fetch ${url}`);
+}
+
 export async function fetchImageBlob(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(String(res.status));
-  return res.blob();
+  return fetchImageBlobWithRetry(url, 1);
 }
 
 export async function convertUrlToPngBlob(url) {
@@ -111,6 +147,7 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
   uiToast(`正在打包下載全文件圖片 (0/${urls.length})...`, 0);
 
   const blobs = Array.from({ length: urls.length }, () => null);
+  const failedItems = [];
   let currentIndex = 0;
   let doneCount = 0;
 
@@ -118,9 +155,10 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
     while (currentIndex < urls.length) {
       const idx = currentIndex++;
       try {
-        blobs[idx] = await fetchImageBlob(urls[idx]);
-      } catch {
+        blobs[idx] = await fetchImageBlobWithRetry(urls[idx]);
+      } catch (err) {
         blobs[idx] = null;
+        failedItems.push({ index: idx + 1, url: urls[idx], error: err?.message || String(err) });
       }
       doneCount++;
       uiToast(`正在打包下載全文件圖片 (${doneCount}/${urls.length})...`, 0);
@@ -148,6 +186,22 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
 
   const failedCount = urls.length - successCount;
 
+  // If any images failed, include a clear diagnostic report inside the ZIP
+  if (failedItems.length > 0) {
+    const reportText = [
+      `Let Me See See - 打包下載報告`,
+      `==============================`,
+      `文件名稱: ${sanitizeFilename()}`,
+      `掃描總計: ${urls.length} 張`,
+      `成功下載: ${successCount} 張`,
+      `下載失敗: ${failedItems.length} 張`,
+      ``,
+      `失敗清單:`,
+      ...failedItems.map((f) => `#${f.index}: ${f.url} (${f.error})`)
+    ].join("\n");
+    zip.file("_download_report.txt", reportText);
+  }
+
   if (successCount > 0) {
     uiToast("正在產生 ZIP 壓縮檔...", 0);
     const zipBlob = await zip.generateAsync({
@@ -156,10 +210,11 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
       compressionOptions: { level: 6 }
     });
     triggerBlobDownload(zipBlob, `${sanitizeFilename()}-images.zip`);
-    uiToast(
-      `下載成功！共打包 ${successCount} 張圖片${failedCount > 0 ? `（${failedCount} 張失敗）` : ""}`,
-      3500
-    );
+    if (failedCount > 0) {
+      uiToast(`下載完成！共打包 ${successCount} 張圖片（${failedCount} 張失敗，已記於 ZIP 報告）`, 4500);
+    } else {
+      uiToast(`下載成功！共打包 ${successCount} 張圖片`, 3500);
+    }
   } else {
     uiToast("打包失敗：無法下載圖片", 3000);
   }

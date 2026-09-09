@@ -33,4 +33,42 @@ test("Unit: Download Manager & Filename Sanitization", async (t) => {
     assert.strictEqual(result.downloaded, 0);
     assert.strictEqual(result.failed, 0);
   });
+
+  await t.test("packImagesToZip: generates _download_report.txt inside zip when some images fail", async () => {
+    const originalFetch = globalThis.fetch;
+    // Simulate image1 succeeding, image2 failing (e.g. 404)
+    globalThis.fetch = async (url) => {
+      if (url.includes("fail")) {
+        return { ok: false, status: 404 };
+      }
+      return {
+        ok: true,
+        blob: async () => new globalThis.Blob(["good-image"], { type: "image/png" })
+      };
+    };
+
+    let filesInZip = {};
+    class MockZip {
+      file(name, content) {
+        filesInZip[name] = content;
+      }
+      async generateAsync() {
+        return new globalThis.Blob(["mock-zip"]);
+      }
+    }
+
+    try {
+      const urls = [
+        "https://example.com/image1=s2048",
+        "https://example.com/fail-image2=s2048"
+      ];
+      const result = await packImagesToZip(urls, null, MockZip);
+      assert.strictEqual(result.downloaded, 1, "Must report 1 downloaded file");
+      assert.strictEqual(result.failed, 1, "Must report 1 failed file");
+      assert.ok(filesInZip["_download_report.txt"], "Must include _download_report.txt when failures occur");
+      assert.ok(filesInZip["_download_report.txt"].includes("fail-image2"), "Report must list the failed URL");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

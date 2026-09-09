@@ -130,6 +130,62 @@ test("Unit: Image Enhancer for Offline OCR", async (t) => {
     }
   });
 
+  await t.test("Colored Spreadsheet Cell: normalizes saturated yellow/colored cell to perceptual grayscale to protect Otsu thresholding", async () => {
+    const origDoc = globalThis.document;
+    const origImg = globalThis.Image;
+
+    try {
+      let putData = null;
+
+      const mockCanvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          drawImage: () => {},
+          getImageData: (x, y, w, h) => {
+            const data = new Uint8ClampedArray(w * h * 4);
+            // Simulate yellow cell: R=255, G=228, B=130 (expected luma = ~225)
+            for (let i = 0; i < data.length; i += 4) {
+              data[i] = 255;
+              data[i + 1] = 228;
+              data[i + 2] = 130;
+              data[i + 3] = 255;
+            }
+            return { data };
+          },
+          putImageData: (imgData) => {
+            putData = imgData.data;
+          }
+        }),
+        toDataURL: () => "data:image/png;base64,mockGrayscaleYellow"
+      };
+
+      globalThis.document = {
+        createElement: (tag) => (tag === "canvas" ? mockCanvas : {})
+      };
+
+      globalThis.Image = class {
+        constructor() {
+          this.width = 1024;
+          this.height = 319;
+          setTimeout(() => this.onload?.(), 0);
+        }
+      };
+
+      const result = await enhanceImageForOcr("data:image/png;base64,mockYellowTable");
+      assert.strictEqual(result, "data:image/png;base64,mockGrayscaleYellow");
+      assert.ok(putData !== null, "Canvas putImageData must be called");
+      // Verify R, G, B are equal to calculated luma (~225)
+      const expectedLuma = Math.round(0.299 * 255 + 0.587 * 228 + 0.114 * 130);
+      assert.strictEqual(putData[0], expectedLuma);
+      assert.strictEqual(putData[1], expectedLuma);
+      assert.strictEqual(putData[2], expectedLuma);
+    } finally {
+      globalThis.document = origDoc;
+      globalThis.Image = origImg;
+    }
+  });
+
   await t.test("Single line snippet: wide snippet (1024x59) is upscaled 2x and padded with clean whitespace", async () => {
     const origDoc = globalThis.document;
     const origImg = globalThis.Image;

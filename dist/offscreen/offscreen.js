@@ -180,14 +180,14 @@
       const avgOverallLuma = sampledCount > 0 ? overallLumaSum / sampledCount : 128;
       const brightRatio = sampledCount > 0 ? brightPixelCount / sampledCount : 0;
       const isDarkBackground = avgBorderLuma < 130 || avgOverallLuma < 115 && brightRatio > 0.05;
-      if (isDarkBackground) {
-        for (let y = pad; y < pad + targetH; y++) {
-          for (let x = pad; x < pad + targetW; x++) {
-            const idx = (y * canvasW + x) * 4;
-            data[idx] = 255 - data[idx];
-            data[idx + 1] = 255 - data[idx + 1];
-            data[idx + 2] = 255 - data[idx + 2];
-          }
+      for (let y = pad; y < pad + targetH; y++) {
+        for (let x = pad; x < pad + targetW; x++) {
+          const idx = (y * canvasW + x) * 4;
+          const g = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+          const val = isDarkBackground ? 255 - g : g;
+          data[idx] = val;
+          data[idx + 1] = val;
+          data[idx + 2] = val;
         }
       }
       if (isDarkBackground) {

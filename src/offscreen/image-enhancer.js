@@ -107,14 +107,19 @@ export async function enhanceImageForOcr(imageSource) {
     // Case B: Overall image is dark (< 115) with bright text elements (> 5% bright pixels)
     const isDarkBackground = avgBorderLuma < 130 || (avgOverallLuma < 115 && brightRatio > 0.05);
 
-    if (isDarkBackground) {
-      for (let y = pad; y < pad + targetH; y++) {
-        for (let x = pad; x < pad + targetW; x++) {
-          const idx = (y * canvasW + x) * 4;
-          data[idx] = 255 - data[idx];         // R
-          data[idx + 1] = 255 - data[idx + 1]; // G
-          data[idx + 2] = 255 - data[idx + 2]; // B
-        }
+    // 4. Luminance normalization across color channels:
+    // Tesseract's internal Leptonica binarizer operates on 8bpp grayscale.
+    // Colored spreadsheet cells (e.g. pastel yellow / pink) have chromatic channel imbalances
+    // (e.g. yellow has high red/green but low blue), which causes Otsu adaptive thresholding
+    // to discard text inside colored cells. Setting R=G=B=perceptual luma standardizes the channels.
+    for (let y = pad; y < pad + targetH; y++) {
+      for (let x = pad; x < pad + targetW; x++) {
+        const idx = (y * canvasW + x) * 4;
+        const g = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+        const val = isDarkBackground ? (255 - g) : g;
+        data[idx] = val;
+        data[idx + 1] = val;
+        data[idx + 2] = val;
       }
     }
 

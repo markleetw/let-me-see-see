@@ -3589,6 +3589,7 @@
   // src/content/ui/toast.js
   var toastTimeoutId = null;
   function uiToast(message, duration = 3e3) {
+    if (typeof document === "undefined") return;
     let toastEl = document.getElementById("let-me-see-see-toast");
     if (toastTimeoutId) {
       clearTimeout(toastTimeoutId);
@@ -3710,51 +3711,120 @@
     return cleaned.join("\n").trim();
   }
 
-  // src/content/shared/clipboard.js
-  async function copyTextToClipboard(text) {
-    if (!text) return false;
-    try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-        await navigator.clipboard.writeText(text);
-        return true;
-      }
-    } catch (err) {
-      console.warn("[Let Me See See] clipboard writeText error:", err);
-    }
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed";
-      ta.style.top = "0";
-      ta.style.left = "-9999px";
-      ta.style.width = "1px";
-      ta.style.height = "1px";
-      ta.style.opacity = "0";
-      ta.style.contain = "strict";
-      const stopPropagation = (e) => e.stopPropagation();
-      ta.addEventListener("copy", stopPropagation, true);
-      ta.addEventListener("select", stopPropagation, true);
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      ta.remove();
-      return ok;
-    } catch {
-      return false;
-    }
+  // src/content/shared/download-manager.js
+  function sanitizeFilename(title = typeof document !== "undefined" ? document.title : "") {
+    return title.replace(/(?:^|\s+)-\s+Google (?:Docs|Sheets|Slides|文件|試算表|簡報|文档|表格|幻灯片)$/i, "").trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "google-document";
   }
-  async function copyImageBlobToClipboard(blob) {
-    if (!blob || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
-      return false;
+  function getImageExtension(blob, url) {
+    const mimeTypes = {
+      "image/gif": "gif",
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/svg+xml": "svg",
+      "image/webp": "webp"
+    };
+    if (blob?.type && mimeTypes[blob.type]) return mimeTypes[blob.type];
+    const ext = url?.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1];
+    return ext ? ext.toLowerCase() : "png";
+  }
+  function triggerBlobDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1e3);
+  }
+  async function fetchImageBlob(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(String(res.status));
+    return res.blob();
+  }
+  async function convertUrlToPngBlob(url) {
+    const blob = await fetchImageBlob(url);
+    if (blob?.type === "image/png") return blob;
+    if (typeof createImageBitmap !== "function" || typeof document === "undefined") {
+      return blob;
     }
+    const bmp = await createImageBitmap(blob);
+    const cvs = document.createElement("canvas");
+    cvs.width = bmp.width;
+    cvs.height = bmp.height;
+    const ctx = cvs.getContext("2d");
+    if (!ctx) {
+      if (typeof bmp.close === "function") bmp.close();
+      throw new Error("Canvas is unavailable");
+    }
+    ctx.drawImage(bmp, 0, 0);
+    if (typeof bmp.close === "function") bmp.close();
+    return new Promise((resolve, reject) => {
+      cvs.toBlob((pngBlob) => {
+        pngBlob ? resolve(pngBlob) : reject(new Error("Image conversion failed"));
+      }, "image/png");
+    });
+  }
+  async function downloadSingleImage(url, index) {
+    if (!url) return false;
     try {
-      const item = new ClipboardItem({ [blob.type || "image/png"]: blob });
-      await navigator.clipboard.write([item]);
+      const blob = await fetchImageBlob(url);
+      const suffix = index ? `-image-${index}` : "";
+      const name = `${sanitizeFilename()}${suffix}.${getImageExtension(blob, url)}`;
+      triggerBlobDownload(blob, name);
       return true;
     } catch {
-      return false;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${sanitizeFilename()}${index ? `-image-${index}` : ""}.${getImageExtension(null, url)}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return true;
     }
+  }
+  async function packImagesToZip(urls, onProgress, JSZipClass = jszip_default) {
+    if (!urls?.length) return { downloaded: 0, failed: 0 };
+    const blobs = Array.from({ length: urls.length }, () => null);
+    let currentIndex = 0;
+    let doneCount = 0;
+    const worker = async () => {
+      while (currentIndex < urls.length) {
+        const idx = currentIndex++;
+        try {
+          blobs[idx] = await fetchImageBlob(urls[idx]);
+        } catch {
+          blobs[idx] = null;
+        }
+        doneCount++;
+        if (typeof onProgress === "function") {
+          try {
+            onProgress(doneCount, urls.length);
+          } catch {
+          }
+        }
+      }
+    };
+    const poolSize = Math.min(4, urls.length);
+    await Promise.all(Array.from({ length: poolSize }, worker));
+    const zip = new JSZipClass();
+    const padLength = Math.max(2, String(urls.length).length);
+    let successCount = 0;
+    blobs.forEach((blob, idx) => {
+      if (!blob) return;
+      successCount++;
+      const numStr = String(idx + 1).padStart(padLength, "0");
+      zip.file(`image-${numStr}.${getImageExtension(blob, urls[idx])}`, blob);
+    });
+    if (successCount > 0) {
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 }
+      });
+      triggerBlobDownload(zipBlob, `${sanitizeFilename()}-images.zip`);
+    }
+    return { downloaded: successCount, failed: urls.length - successCount };
   }
 
   // src/content/shared/image-matcher.js
@@ -3839,6 +3909,111 @@
       }
     }
     return best;
+  }
+
+  // src/content/shared/clipboard.js
+  async function copyTextToClipboard(text) {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (err) {
+      console.warn("[Let Me See See] clipboard writeText error:", err);
+    }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "0";
+      ta.style.left = "-9999px";
+      ta.style.width = "1px";
+      ta.style.height = "1px";
+      ta.style.opacity = "0";
+      ta.style.contain = "strict";
+      const stopPropagation = (e) => e.stopPropagation();
+      ta.addEventListener("copy", stopPropagation, true);
+      ta.addEventListener("select", stopPropagation, true);
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  async function imageSourceToPngBlob(source) {
+    if (typeof window !== "undefined") {
+      if ((!source || source === window.__letMeSeeSeeActiveDataUrl) && window.__letMeSeeSeeActiveRaster) {
+        const dataUrl = rasterToDataUrl(window.__letMeSeeSeeActiveRaster);
+        if (dataUrl) return convertUrlToPngBlob(dataUrl);
+      }
+    }
+    if (!source) {
+      throw new Error("No image source provided");
+    }
+    if (source instanceof Blob && source.type === "image/png") {
+      return source;
+    }
+    if (source instanceof Blob) {
+      if (typeof createImageBitmap !== "function" || typeof document === "undefined") {
+        return source;
+      }
+      const bmp = await createImageBitmap(source);
+      const cvs = document.createElement("canvas");
+      cvs.width = bmp.width;
+      cvs.height = bmp.height;
+      const ctx = cvs.getContext("2d");
+      if (!ctx) {
+        if (typeof bmp.close === "function") bmp.close();
+        throw new Error("Canvas context is unavailable");
+      }
+      ctx.drawImage(bmp, 0, 0);
+      if (typeof bmp.close === "function") bmp.close();
+      return new Promise((resolve, reject) => {
+        cvs.toBlob((pngBlob) => {
+          pngBlob ? resolve(pngBlob) : reject(new Error("Image conversion failed"));
+        }, "image/png");
+      });
+    }
+    if (typeof source === "string" && source.trim()) {
+      return convertUrlToPngBlob(source.trim());
+    }
+    throw new Error("Unsupported image source type");
+  }
+  async function copyImageToClipboard(imgUrlOrBlob) {
+    if (!imgUrlOrBlob && typeof window !== "undefined") {
+      if (window.__letMeSeeSeeActiveDataUrl) {
+        imgUrlOrBlob = window.__letMeSeeSeeActiveDataUrl;
+      } else if (window.__letMeSeeSeeActiveRaster) {
+        imgUrlOrBlob = rasterToDataUrl(window.__letMeSeeSeeActiveRaster);
+      }
+    }
+    if (!imgUrlOrBlob || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+      uiToast("\u700F\u89BD\u5668\u4E0D\u652F\u63F4\u526A\u8CBC\u7C3F\u5BEB\u5165", 3e3);
+      return false;
+    }
+    try {
+      const pngBlobPromise = imageSourceToPngBlob(imgUrlOrBlob);
+      const item = new ClipboardItem({ "image/png": pngBlobPromise });
+      await navigator.clipboard.write([item]);
+      return true;
+    } catch (err) {
+      console.warn("[Let Me See See] Direct ClipboardItem write with Promise failed, retrying with resolved blob:", err);
+      try {
+        const resolvedBlob = await imageSourceToPngBlob(imgUrlOrBlob);
+        const item = new ClipboardItem({ "image/png": resolvedBlob });
+        await navigator.clipboard.write([item]);
+        return true;
+      } catch (fallbackErr) {
+        console.error("[Let Me See See] Copy image to clipboard failed:", fallbackErr);
+        uiToast("\u8907\u88FD\u5931\u6557\uFF1A\u8ACB\u5148\u9EDE\u64CA\u9801\u9762\u6216\u5141\u8A31\u526A\u8CBC\u7C3F\u6B0A\u9650", 3e3);
+        return false;
+      }
+    }
   }
 
   // src/content/shared/lru-cache.js
@@ -4058,99 +4233,6 @@
     }
     uiToast("\u5716\u7247\u4E2D\u672A\u5075\u6E2C\u5230\u6587\u5B57", 3e3);
     return false;
-  }
-
-  // src/content/shared/download-manager.js
-  function sanitizeFilename(title = typeof document !== "undefined" ? document.title : "") {
-    return title.replace(/(?:^|\s+)-\s+Google (?:Docs|Sheets|Slides|文件|試算表|簡報|文档|表格|幻灯片)$/i, "").trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "google-document";
-  }
-  function getImageExtension(blob, url) {
-    const mimeTypes = {
-      "image/gif": "gif",
-      "image/jpeg": "jpg",
-      "image/png": "png",
-      "image/svg+xml": "svg",
-      "image/webp": "webp"
-    };
-    if (blob?.type && mimeTypes[blob.type]) return mimeTypes[blob.type];
-    const ext = url?.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1];
-    return ext ? ext.toLowerCase() : "png";
-  }
-  function triggerBlobDownload(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1e3);
-  }
-  async function fetchImageBlob(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(String(res.status));
-    return res.blob();
-  }
-  async function downloadSingleImage(url, index) {
-    if (!url) return false;
-    try {
-      const blob = await fetchImageBlob(url);
-      const suffix = index ? `-image-${index}` : "";
-      const name = `${sanitizeFilename()}${suffix}.${getImageExtension(blob, url)}`;
-      triggerBlobDownload(blob, name);
-      return true;
-    } catch {
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${sanitizeFilename()}${index ? `-image-${index}` : ""}.${getImageExtension(null, url)}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      return true;
-    }
-  }
-  async function packImagesToZip(urls, onProgress, JSZipClass = jszip_default) {
-    if (!urls?.length) return { downloaded: 0, failed: 0 };
-    const blobs = Array.from({ length: urls.length }, () => null);
-    let currentIndex = 0;
-    let doneCount = 0;
-    const worker = async () => {
-      while (currentIndex < urls.length) {
-        const idx = currentIndex++;
-        try {
-          blobs[idx] = await fetchImageBlob(urls[idx]);
-        } catch {
-          blobs[idx] = null;
-        }
-        doneCount++;
-        if (typeof onProgress === "function") {
-          try {
-            onProgress(doneCount, urls.length);
-          } catch {
-          }
-        }
-      }
-    };
-    const poolSize = Math.min(4, urls.length);
-    await Promise.all(Array.from({ length: poolSize }, worker));
-    const zip = new JSZipClass();
-    const padLength = Math.max(2, String(urls.length).length);
-    let successCount = 0;
-    blobs.forEach((blob, idx) => {
-      if (!blob) return;
-      successCount++;
-      const numStr = String(idx + 1).padStart(padLength, "0");
-      zip.file(`image-${numStr}.${getImageExtension(blob, urls[idx])}`, blob);
-    });
-    if (successCount > 0) {
-      const zipBlob = await zip.generateAsync({
-        type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: { level: 6 }
-      });
-      triggerBlobDownload(zipBlob, `${sanitizeFilename()}-images.zip`);
-    }
-    return { downloaded: successCount, failed: urls.length - successCount };
   }
 
   // src/content/sheets/formula-parser.js
@@ -4838,7 +4920,7 @@ ${selector} {
       url = window.SlideImageUrl || "";
     }
     if (!url) {
-      url = getActiveDocsImageUrl() || getActiveSheetsImageUrl() || "";
+      url = getActiveDocsImageUrl() || getActiveSheetsImageUrl() || typeof window !== "undefined" && (window.SlideImageUrl || window.__letMeSeeSeeActiveDataUrl) || "";
     }
     return url;
   }
@@ -4848,7 +4930,7 @@ ${selector} {
       case "zoom":
         return openViewerLightbox([url], 0, viewer_default);
       case "copy":
-        return copyImageBlobToClipboard(url);
+        return copyImageToClipboard(url);
       case "ocr":
         return ocrImageToText(url);
       case "download":
@@ -4928,6 +5010,8 @@ ${selector} {
         sn: handleToolbarAction,
         ocrImageToText,
         copyTextToClipboard,
+        copyImageToClipboard,
+        vi: copyImageToClipboard,
         triggerOcrPrewarm,
         getCache: () => imageCache
       };

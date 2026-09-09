@@ -173,6 +173,47 @@ test("Suite 5: Clipboard Failure UI Feedback (Toast & Button Error State)", asyn
     win.__letMeSeeSee.uiToast("已成功掃描並複製文字至剪貼簿！(15 字)", 3500);
     assert.strictEqual(liveToast.textContent, "已成功掃描並複製文字至剪貼簿！(15 字)", "Toast text must update in-place without removing early");
   });
+
+  await t.test("copyImageToClipboard writes image/png Blob to navigator.clipboard", async () => {
+    let writtenItems = [];
+    win.navigator.clipboard.write = async (items) => {
+      writtenItems = items;
+    };
+
+    const ok = await win.__letMeSeeSee.copyImageToClipboard("https://example.com/sample-image.png");
+    assert.strictEqual(ok, true, "copyImageToClipboard must succeed");
+    assert.strictEqual(writtenItems.length, 1, "Must write 1 ClipboardItem");
+    assert.ok(writtenItems[0].types.includes("image/png"), "ClipboardItem must have image/png type");
+  });
+
+  await t.test("Toolbar Copy Button: clicking copy button triggers copy and success state", async () => {
+    let writeCalled = false;
+    win.navigator.clipboard.write = async () => { writeCalled = true; };
+
+    win.__letMeSeeSee.Te();
+    const copyBtn = doc.getElementById("CopyImageIconBtn");
+    assert.ok(copyBtn, "Copy image button must exist in toolbar");
+
+    // Provide active image URL
+    win.SlideImageUrl = "https://example.com/sample-image.png";
+
+    // Click button with active image
+    const clickPromise = copyBtn.onclick();
+    await clickPromise;
+
+    assert.strictEqual(writeCalled, true, "Clipboard write must be triggered by button click");
+  });
+
+  await t.test("copyImageToClipboard: displays error toast on clipboard rejection", async () => {
+    win.navigator.clipboard.write = async () => { throw new Error("NotAllowedError"); };
+
+    const ok = await win.__letMeSeeSee.copyImageToClipboard("https://example.com/sample-image.png");
+    assert.strictEqual(ok, false, "Must return false on error");
+
+    const toast = doc.getElementById("let-me-see-see-toast");
+    assert.ok(toast, "Toast must be present");
+    assert.ok(toast.textContent.includes("複製失敗"), "Toast must display copy failure message");
+  });
 });
 
 test("Suite 6: Background Service Worker Initialization", (t) => {

@@ -50,6 +50,10 @@ export async function fetchImageBlob(url) {
 
 export async function convertUrlToPngBlob(url) {
   const blob = await fetchImageBlob(url);
+  if (blob?.type === "image/png") return blob;
+  if (typeof createImageBitmap !== "function" || typeof document === "undefined") {
+    return blob;
+  }
   const bmp = await createImageBitmap(blob);
   const cvs = document.createElement("canvas");
   cvs.width = bmp.width;

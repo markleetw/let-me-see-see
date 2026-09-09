@@ -362,6 +362,18 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
     requestAnimationFrame: (cb) => setTimeout(cb, 16),
     cancelAnimationFrame: (id) => clearTimeout(id)
   };
+
+  class MockClipboardItem {
+    constructor(items) {
+      this.types = Object.keys(items);
+      this._items = items;
+    }
+    async getType(type) {
+      const val = this._items[type];
+      return typeof val?.then === "function" ? await val : val;
+    }
+  }
+
   const loc = new context.URL(url);
   doc.location = loc;
   win.location = loc;
@@ -371,6 +383,16 @@ function createMockEnv(url = "https://docs.google.com/document/d/123/edit") {
   win.globalThis = win;
   win.chrome = chromeMock;
   win.performance = { now: () => Date.now() };
+  const mockCreateImageBitmap = async (src) => ({
+    width: 100,
+    height: 100,
+    close() {}
+  });
+
+  win.ClipboardItem = MockClipboardItem;
+  context.ClipboardItem = MockClipboardItem;
+  win.createImageBitmap = mockCreateImageBitmap;
+  context.createImageBitmap = mockCreateImageBitmap;
   context.globalThis = win;
 
   return { context, listeners, doc, win, chromeMock };

@@ -11,7 +11,7 @@ import { openViewerLightbox } from "./ui/viewer-lightbox.js";
 import { uiToast } from "./ui/toast.js";
 import { ocrImageToText } from "./ocr/ocr-service.js";
 import { cleanOcrText } from "./ocr/text-cleaner.js";
-import { copyTextToClipboard, copyImageBlobToClipboard } from "./shared/clipboard.js";
+import { copyTextToClipboard, copyImageToClipboard, copyImageBlobToClipboard } from "./shared/clipboard.js";
 import { sanitizeFilename, downloadSingleImage, packImagesToZip } from "./shared/download-manager.js";
 import { getNetworkResourceUrls } from "./shared/network-resources.js";
 import { extractFormulaBarImageUrl } from "./sheets/formula-parser.js";
@@ -54,7 +54,11 @@ export function getActiveImageUrl() {
   }
 
   if (!url) {
-    url = getActiveDocsImageUrl() || getActiveSheetsImageUrl() || "";
+    url =
+      getActiveDocsImageUrl() ||
+      getActiveSheetsImageUrl() ||
+      (typeof window !== "undefined" && (window.SlideImageUrl || window.__letMeSeeSeeActiveDataUrl)) ||
+      "";
   }
 
   return url;
@@ -70,7 +74,7 @@ export async function handleToolbarAction(action) {
     case "zoom":
       return openViewerLightbox([url], 0, Viewer);
     case "copy":
-      return copyImageBlobToClipboard(url);
+      return copyImageToClipboard(url);
     case "ocr":
       return ocrImageToText(url);
     case "download":
@@ -169,6 +173,8 @@ export function bootstrap() {
       sn: handleToolbarAction,
       ocrImageToText,
       copyTextToClipboard,
+      copyImageToClipboard,
+      vi: copyImageToClipboard,
       triggerOcrPrewarm,
       getCache: () => imageCache
     };

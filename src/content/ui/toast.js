@@ -7,6 +7,7 @@
 let toastTimeoutId = null;
 
 export function uiToast(message, duration = 3000) {
+  if (typeof document === "undefined") return;
   let toastEl = document.getElementById("let-me-see-see-toast");
 
   if (toastTimeoutId) {

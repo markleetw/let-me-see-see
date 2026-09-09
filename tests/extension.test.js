@@ -257,7 +257,7 @@ test("Suite 6: Background Service Worker Initialization", (t) => {
 test("Suite 7: On-Demand Batch Download & ZIP Packaging", async (t) => {
   await t.test("Batch download message triggers scan, zip generation, and download", async () => {
     const freshScript = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
-    const { context, win, chromeMock } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    const { context, doc, win, chromeMock } = createMockEnv("https://docs.google.com/document/d/123/edit");
     vm.runInNewContext(freshScript, context);
 
     assert.ok(typeof win.__letMeSeeSee.batchDownloadAllImages === "function", "batchDownloadAllImages must be exposed");
@@ -276,6 +276,10 @@ test("Suite 7: On-Demand Batch Download & ZIP Packaging", async (t) => {
     assert.strictEqual(result.failed, 0, "Must report 0 failed files");
     assert.strictEqual(progressCalls.length, 2, "onProgress must be called for each file");
 
+    const toast = doc.getElementById("let-me-see-see-toast");
+    assert.ok(toast, "Batch download must create toast notification in DOM");
+    assert.ok(toast.textContent.includes("下載成功"), "Toast must display download success message");
+
     // Test runtime message 'batch-download-images'
     const listener = chromeMock.runtime.onMessage._listeners[0];
     assert.ok(listener, "Runtime message listener must be present");
@@ -284,6 +288,18 @@ test("Suite 7: On-Demand Batch Download & ZIP Packaging", async (t) => {
     });
     assert.ok(response, "Must respond to batch-download-images message");
     assert.ok(typeof response.downloaded === "number", "Response must include downloaded count");
+  });
+
+  await t.test("Batch download with 0 images displays toast indicating no images found", async () => {
+    const freshScript = fs.readFileSync("dist/contentScripts/index.global.js", "utf8");
+    const { context, doc, win } = createMockEnv("https://docs.google.com/document/d/123/edit");
+    vm.runInNewContext(freshScript, context);
+
+    const result = await win.__letMeSeeSee.batchDownloadAllImages([]);
+    assert.strictEqual(result.downloaded, 0);
+    const toast = doc.getElementById("let-me-see-see-toast");
+    assert.ok(toast, "Toast must be created when no images found");
+    assert.ok(toast.textContent.includes("未在文件中找到任何圖片"), "Toast must indicate no images found");
   });
 
   await t.test("Popup UI: mounts batch export section and button", async () => {

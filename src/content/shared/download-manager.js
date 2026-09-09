@@ -73,26 +73,43 @@ export async function convertUrlToPngBlob(url) {
 }
 
 export async function downloadSingleImage(url, index) {
-  if (!url) return false;
+  if (!url) {
+    uiToast("未找到圖片連結", 3000);
+    return false;
+  }
   try {
+    uiToast("正在下載圖片...", 2000);
     const blob = await fetchImageBlob(url);
     const suffix = index ? `-image-${index}` : "";
     const name = `${sanitizeFilename()}${suffix}.${getImageExtension(blob, url)}`;
     triggerBlobDownload(blob, name);
+    uiToast("圖片下載成功！", 2500);
     return true;
   } catch {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${sanitizeFilename()}${index ? `-image-${index}` : ""}.${getImageExtension(null, url)}`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    return true;
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${sanitizeFilename()}${index ? `-image-${index}` : ""}.${getImageExtension(null, url)}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      uiToast("已啟動圖片下載", 2500);
+      return true;
+    } catch {
+      uiToast("圖片下載失敗", 3000);
+      return false;
+    }
   }
 }
 
 export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
-  if (!urls?.length) return { downloaded: 0, failed: 0 };
+  if (!urls?.length) {
+    uiToast("未在文件中找到任何圖片", 3000);
+    return { downloaded: 0, failed: 0 };
+  }
+
+  uiToast(`正在打包下載全文件圖片 (0/${urls.length})...`, 0);
+
   const blobs = Array.from({ length: urls.length }, () => null);
   let currentIndex = 0;
   let doneCount = 0;
@@ -106,6 +123,7 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
         blobs[idx] = null;
       }
       doneCount++;
+      uiToast(`正在打包下載全文件圖片 (${doneCount}/${urls.length})...`, 0);
       if (typeof onProgress === "function") {
         try {
           onProgress(doneCount, urls.length);
@@ -128,14 +146,23 @@ export async function packImagesToZip(urls, onProgress, JSZipClass = JSZip) {
     zip.file(`image-${numStr}.${getImageExtension(blob, urls[idx])}`, blob);
   });
 
+  const failedCount = urls.length - successCount;
+
   if (successCount > 0) {
+    uiToast("正在產生 ZIP 壓縮檔...", 0);
     const zipBlob = await zip.generateAsync({
       type: "blob",
       compression: "DEFLATE",
       compressionOptions: { level: 6 }
     });
     triggerBlobDownload(zipBlob, `${sanitizeFilename()}-images.zip`);
+    uiToast(
+      `下載成功！共打包 ${successCount} 張圖片${failedCount > 0 ? `（${failedCount} 張失敗）` : ""}`,
+      3500
+    );
+  } else {
+    uiToast("打包失敗：無法下載圖片", 3000);
   }
 
-  return { downloaded: successCount, failed: urls.length - successCount };
+  return { downloaded: successCount, failed: failedCount };
 }

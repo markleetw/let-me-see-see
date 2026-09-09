@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
-import { sanitizeFilename, getImageExtension } from "../../src/content/shared/download-manager.js";
+import { sanitizeFilename, getImageExtension, packImagesToZip } from "../../src/content/shared/download-manager.js";
 
 test("Unit: Download Manager & Filename Sanitization", async (t) => {
   await t.test("Filename sanitization: preserves Chinese characters while removing invalid filesystem characters", () => {
@@ -26,5 +26,11 @@ test("Unit: Download Manager & Filename Sanitization", async (t) => {
   await t.test("Extension detection: extracts extension from URL if blob type is generic", () => {
     const url = "https://example.com/assets/banner.webp?version=2&size=large#top";
     assert.strictEqual(getImageExtension(null, url), "webp");
+  });
+
+  await t.test("packImagesToZip: returns downloaded count and handles empty list gracefully", async () => {
+    const result = await packImagesToZip([]);
+    assert.strictEqual(result.downloaded, 0);
+    assert.strictEqual(result.failed, 0);
   });
 });

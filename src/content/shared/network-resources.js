@@ -26,11 +26,25 @@ export function deduplicate(arr) {
 export function getNetworkResourceUrls(docType, entries = (typeof performance !== "undefined" && typeof performance.getEntriesByType === "function" ? performance.getEntriesByType("resource") : [])) {
   const pattern = DOC_PATH_PATTERNS[docType];
   const allUrls = deduplicate(entries.map((e) => (typeof e === "string" ? e : e.name)));
-  const matching = allUrls.filter((u) => u.includes(pattern));
+  const matching = allUrls.filter((u) => pattern && u.includes(pattern));
   const highResCandidates = matching.filter((u) => /=s(?:1024|1600|2048|4096)(?:$|[&#?])/.test(u));
   const base = highResCandidates.length ? highResCandidates : matching;
 
-  if (docType !== "spreadsheets") return base;
+  const domUrls = [];
+  if (typeof document !== "undefined") {
+    try {
+      document.querySelectorAll("image, img").forEach((el) => {
+        const src = el.getAttribute("href") || el.getAttribute("xlink:href") || el.getAttribute("src");
+        if (src && !src.startsWith("data:") && !src.includes("gstatic.com")) {
+          domUrls.push(src);
+        }
+      });
+    } catch {}
+  }
+
+  if (docType !== "spreadsheets") {
+    return deduplicate([...base, ...domUrls]);
+  }
 
   const docsubipk = deduplicate(allUrls.filter((u) => DOCSUBIPK_REGEX.test(u)).map(upgradeToHighResUrl));
   const imageExts = deduplicate(
@@ -49,7 +63,7 @@ export function getNetworkResourceUrls(docType, entries = (typeof performance !=
 
   const formulaUrl = extractFormulaBarImageUrl();
   const formulaList = formulaUrl ? [formulaUrl] : [];
-  return deduplicate([...base, ...docsubipk, ...imageExts, ...formulaList]);
+  return deduplicate([...base, ...docsubipk, ...imageExts, ...formulaList, ...domUrls]);
 }
 
 export function getFormatFromMime(mimeType, url) {

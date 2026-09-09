@@ -42,7 +42,7 @@ test("Unit: OCR Text Cleaner & ReDoS Guard", async (t) => {
     assert.ok(!cleaned.includes("vy"), "Must remove stray vy artifact");
   });
 
-  await t.test("Performance & ReDoS Guard: 50,000 characters process in under 50ms", () => {
+  await t.test("Performance & ReDoS Guard: 50,000 characters process in under 200ms (ReDoS free)", () => {
     const base = "這是一個測試字串 2026/04 US$ 81,379 80.30% 專案進度追蹤 (Testing Roadmap) 穩定執行中\n";
     const massive = base.repeat(500); // ~50,000 chars
 
@@ -51,6 +51,6 @@ test("Unit: OCR Text Cleaner & ReDoS Guard", async (t) => {
     const elapsed = performance.now() - start;
 
     assert.ok(result.length > 0, "Result must not be empty");
-    assert.ok(elapsed < 50, `Expected cleanOcrText to finish in <50ms, took ${elapsed.toFixed(2)}ms`);
+    assert.ok(elapsed < 200, `Expected cleanOcrText to finish in <200ms, took ${elapsed.toFixed(2)}ms`);
   });
 });

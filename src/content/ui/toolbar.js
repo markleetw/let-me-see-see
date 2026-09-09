@@ -145,7 +145,12 @@ export function createFloatingToolbar(onAction) {
 
   // 4. Download Button
   const downloadBtn = createToolbarButton(BTN_DOWNLOAD_ID, "Download image", ICONS.download);
-  downloadBtn.onclick = () => actionHandler("download");
+  downloadBtn.onclick = async () => {
+    downloadBtn.disabled = true;
+    const ok = await actionHandler("download");
+    downloadBtn.disabled = false;
+    ok ? showButtonSuccess(downloadBtn) : showButtonFailure(downloadBtn);
+  };
 
   toolbar.style.display = "none";
   toolbar.append(viewBtn, copyBtn, ocrBtn, downloadBtn);

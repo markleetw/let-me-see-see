@@ -5,7 +5,6 @@
 
 import { uiToast } from "../ui/toast.js";
 import { cleanOcrText } from "./text-cleaner.js";
-import { processOcrTableOutput } from "./table-detector.js";
 import { copyTextToClipboard } from "../shared/clipboard.js";
 import { rasterToDataUrl } from "../shared/image-matcher.js";
 import { getImageBitmap } from "../shared/lru-cache.js";
@@ -95,16 +94,14 @@ export async function ocrImageToText(imgUrl, options = {}) {
       if (resp?.success && resp.text && resp.text.trim()) {
         const cleanText = cleanOcrText(resp.text);
         if (cleanText.length > 0) {
-          const tableResult = processOcrTableOutput(cleanText, resp.ocrData);
-          const textToCopy = tableResult.isTable ? tableResult.text : cleanText;
-          let copied = await copyTextToClipboard(textToCopy);
+          let copied = await copyTextToClipboard(cleanText);
           if (!copied) {
             try {
               const copyResp = await new Promise((resolve) => {
                 chrome.runtime.sendMessage(
                   {
                     type: "copy-to-clipboard",
-                    text: textToCopy
+                    text: cleanText
                   },
                   (r) => resolve(r)
                 );
@@ -113,11 +110,7 @@ export async function ocrImageToText(imgUrl, options = {}) {
             } catch {}
           }
           cleanupCropButtonStates();
-          if (tableResult.isTable) {
-            uiToast(`📊 已辨識表格結構並複製為試算表格式 (TSV)！(${tableResult.rowCount} 列 × ${tableResult.colCount} 欄)`, 3500);
-          } else {
-            uiToast(`已成功掃描並複製文字至剪貼簿！(${cleanText.length} 字)`, 3500);
-          }
+          uiToast(`已成功掃描並複製文字至剪貼簿！(${cleanText.length} 字)`, 3500);
           return true;
         }
       }

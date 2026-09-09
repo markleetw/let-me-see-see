@@ -65,12 +65,7 @@ This document provides system design, architectural invariants, communication pr
 - **Maintain 1:1 Native Resolution**: Never apply fractional bilinear upscaling (e.g. 1.5625x) to screenshots; it blurs fine 1px strokes of Traditional Chinese characters.
 - **Never Invert the Whole Image**: Inverting a white-background document makes 90% of the canvas pitch-black (`#000000`), completely breaking Leptonica's Otsu binarization and PSM layout analysis.
 
-### F. Table Structure Detection & TSV Serialization
-- **Linear-Sweep Column Clustering**: Word $x_0$ coordinates are pre-sorted; clustering uses an $O(N)$ single-pass running mean with a 35px threshold (`findColumnBins`), strictly avoiding $O(N \times K)$ nested loops.
-- **TSV Grid Alignment**: Tables with $\ge 2$ columns and $\ge 2$ rows serialize directly to Tab-Separated Values (`\t` and `\n`), enabling instant grid cell pasting into Google Sheets and Microsoft Excel without adding additional buttons to the floating toolbar.
-- **Header Protection**: Single-character column headers (`A`, `B`, `ID`, `No`) must never be dropped by text sanitization rules.
-
-### G. Lightbox Snippet OCR & Canvas Memory
+### F. Lightbox Snippet OCR & Canvas Memory
 - **Coordinate Projection & Buffer**: Viewport selection box converts to native image coordinates using:
   `cropX = clamp(0, naturalWidth - 1, round((screenBox.left - imgRect.left) * scaleX - buffer))` with an 18px safety buffer.
 - **rAF Drag Throttling**: Lightbox drag-to-select updates are strictly throttled via `requestAnimationFrame` with cancelable `rafId` on `mouseup` and `cleanup` to maintain 60fps on high-polling rate mice.
@@ -98,7 +93,6 @@ This document provides system design, architectural invariants, communication pr
 | `Cs()` / `batchDownloadAllImages` | `src/content/shared/download-manager.js` | Concurrency-limited (pool=4) batch download with JSZip |
 | `uiToast()` | `src/content/ui/toast.js` | Persistent status notification (`duration: 0` during OCR, 3.5s fadeout) |
 | `cleanOcrText()` / `disambiguateCjkCharacters()` | `src/content/ocr/text-cleaner.js` | Strips pipes (`\|`), cleans chevrons, disambiguates CJK confusion families |
-| `findColumnBins()` / `detectTableFromTesseractResult()` | `src/content/ocr/table-detector.js` | $O(N)$ column clustering and TSV serialization for spreadsheets |
 | `calculateImageCropBounds()` / `startLightboxCrop()` | `src/content/ui/lightbox-crop.js` | Lightbox coordinate projection with 18px buffer and rAF drag selection |
 | `renderModernViewerToolbar()` | `src/content/ui/viewer-lightbox.js` | Modern 44px glassmorphism capsule with SVG icons & crop action |
 | `enhanceImageForOcr()` | `src/offscreen/image-enhancer.js` | 2x upscaling for small text, polarity inversion for dark background |

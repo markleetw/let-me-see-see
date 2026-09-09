@@ -3860,47 +3860,6 @@
     }
     return cleaned.join("\n").trim();
   }
-  function cleanTableCell(text) {
-    if (!text) return "";
-    let val = text.trim();
-    val = val.replace(/[\t\r\n]+/g, " ").trim();
-    val = val.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
-    val = val.replace(/\busS\s*/g, "US$ ");
-    val = val.replace(/\b2[D0O]2[bB6]\/([0-1]\d)\b/g, "2026/$1");
-    val = val.replace(/\b(20[12])[bB]\/([0-1][\dbB])\b/g, (m, y, mo) => y + "6/" + mo.replace(/[bB]/g, "6"));
-    val = val.replace(/\b(20\d\d)[1l|I/]([0-1]\d)\b/g, "$1/$2");
-    val = val.replace(/CumulativeGap\b/g, "Cumulative Gap");
-    val = val.replace(/^[📅💳\s]+/g, "");
-    val = val.replace(/[»«▾▼►▶]/g, "");
-    val = val.replace(/\s*[⌵▼▾►▶]\s*$/g, "");
-    val = val.replace(/\s+[vV]\s*$/g, "");
-    val = val.replace(/\bvy\b/gi, "");
-    val = val.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
-    val = val.replace(/(\d)[|Il]+(?=[,\s\t]|$)/g, (m, d) => d + "1".repeat(m.length - 1));
-    val = val.replace(/,[|Il]+(\d)/g, (m, d) => ",1" + d);
-    val = val.replace(/(\d)[|Il]+(\d)/g, (m, d1, d2) => d1 + "1" + d2);
-    val = val.replace(/\b[|Il](\d)/g, "1$1");
-    val = val.replace(/([0-9,])[|Il]+([0-9,])/g, (m, p1, p2) => p1 + "1".repeat(m.length - p1.length - p2.length) + p2);
-    val = val.replace(/-\s*[|Il]+\s*(?=[0-9bBoO])/g, "-1");
-    val = val.replace(/(\d)[bB](\d)/g, "$16$2");
-    val = val.replace(/(\d)[bB],/g, "$16,");
-    val = val.replace(/,[bB](\d)/g, ",6$1");
-    val = val.replace(/\b[bB](\d)/g, "6$1");
-    val = val.replace(/(\d)[bB]\b/g, "$16");
-    val = val.replace(/(\d)[bB]\./g, "$16.");
-    val = val.replace(/\.([bB])(\d)/g, ".6$2");
-    val = val.replace(/(\d)[bB]%/g, "$16%");
-    val = val.replace(/(\d)[oO](\d)/g, "$10$2");
-    val = val.replace(/,[oO](\d)/g, ",0$1");
-    val = val.replace(/(\d)[oO],/g, "$10,");
-    val = val.replace(/(\d)[oO]%/g, "$10%");
-    val = val.replace(/\|+/g, " ").trim();
-    val = val.replace(/-(\d+)\s+([0-9bBoO]+),/g, "-$1$2,");
-    const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
-    val = val.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
-    val = disambiguateCjkCharacters(val);
-    return val.trim();
-  }
   function disambiguateCjkCharacters(text) {
     if (!text) return "";
     let val = text;
@@ -3950,261 +3909,6 @@
     val = val.replace(/小[烏鳥]/g, "\u5C0F\u9CE5");
     val = val.replace(/候[烏鳥]/g, "\u5019\u9CE5");
     return val;
-  }
-
-  // src/content/ocr/table-detector.js
-  function findColumnBins(rows, tolerance = 35) {
-    const allXStarts = [];
-    for (let r = 0; r < rows.length; r++) {
-      for (const cell of rows[r]) {
-        if (typeof cell.x0 === "number") {
-          allXStarts.push({ x: cell.x0, rowIdx: r });
-        }
-      }
-    }
-    if (allXStarts.length === 0) return [];
-    allXStarts.sort((a, b) => a.x - b.x);
-    const clusters = [];
-    let currentCluster = null;
-    for (const item of allXStarts) {
-      const x = item.x;
-      if (!currentCluster) {
-        currentCluster = { points: [x], rows: /* @__PURE__ */ new Set([item.rowIdx]), mean: x, min: x, max: x };
-        clusters.push(currentCluster);
-      } else if (Math.abs(currentCluster.mean - x) <= tolerance) {
-        currentCluster.points.push(x);
-        currentCluster.rows.add(item.rowIdx);
-        currentCluster.mean = (currentCluster.mean * (currentCluster.points.length - 1) + x) / currentCluster.points.length;
-        currentCluster.max = x;
-      } else {
-        currentCluster = { points: [x], rows: /* @__PURE__ */ new Set([item.rowIdx]), mean: x, min: x, max: x };
-        clusters.push(currentCluster);
-      }
-    }
-    const minRows = Math.max(2, Math.floor(rows.length * 0.35));
-    return clusters.filter((c) => c.rows.size >= minRows).sort((a, b) => a.mean - b.mean).map((c) => ({
-      centerX: c.mean,
-      minX: c.min,
-      maxX: c.max
-    }));
-  }
-  function detectTableFromTesseractResult(rawLines) {
-    if (!Array.isArray(rawLines) || rawLines.length < 2) {
-      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
-    }
-    let rows = [];
-    for (const line of rawLines) {
-      const validWords = (line.words || []).filter((w) => {
-        const t = (w.text || "").trim();
-        return t && !/^[|—_\-]+$/.test(t);
-      });
-      if (!validWords.length) continue;
-      const lineCells = [];
-      let currentCell = null;
-      for (const w of validWords) {
-        const wText = (w.text || "").trim();
-        const x0 = w.bbox ? w.bbox.x0 : null;
-        const x1 = w.bbox ? w.bbox.x1 : null;
-        if (!currentCell) {
-          currentCell = { text: wText, x0, x1 };
-        } else if (x0 !== null && currentCell.x1 !== null && x0 - currentCell.x1 <= 24) {
-          currentCell.text += (isCjk(currentCell.text.slice(-1)) && isCjk(wText.charAt(0)) ? "" : " ") + wText;
-          currentCell.x1 = Math.max(currentCell.x1, x1);
-        } else {
-          lineCells.push(currentCell);
-          currentCell = { text: wText, x0, x1 };
-        }
-      }
-      if (currentCell) lineCells.push(currentCell);
-      if (lineCells.length > 0) rows.push(lineCells);
-    }
-    if (rows.length < 2) {
-      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
-    }
-    if (rows.length >= 3) {
-      const subsequentColCounts = rows.slice(1).map((r) => r.length);
-      const sortedCounts = [...subsequentColCounts].sort((a, b) => a - b);
-      const medianCols = sortedCounts[Math.floor(sortedCounts.length / 2)];
-      if (medianCols >= 4 && rows[0].length <= Math.floor(medianCols * 0.5)) {
-        rows.shift();
-      }
-    }
-    if (rows.some(isTimelineRow)) {
-      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
-    }
-    const columnBins = findColumnBins(rows);
-    if (columnBins.length < 2) {
-      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
-    }
-    const colOccupancy = new Array(columnBins.length).fill(0);
-    for (const row of rows) {
-      const presentBins = /* @__PURE__ */ new Set();
-      for (const cell of row) {
-        if (cell.x0 === null) continue;
-        let closestColIdx = 0;
-        let minDiff = Infinity;
-        for (let i = 0; i < columnBins.length; i++) {
-          const diff = Math.abs(cell.x0 - columnBins[i].centerX);
-          if (diff < minDiff) {
-            minDiff = diff;
-            closestColIdx = i;
-          }
-        }
-        presentBins.add(closestColIdx);
-      }
-      for (const idx of presentBins) {
-        colOccupancy[idx]++;
-      }
-    }
-    const highOccupancyCols = colOccupancy.filter((cnt) => cnt >= Math.max(2, Math.floor(rows.length * 0.55)));
-    if (highOccupancyCols.length < 2) {
-      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
-    }
-    if (columnBins.length === 2) {
-      const row0Text = rows[0].map((c) => c.text).join(" ");
-      const hasHeaderKeyword = /^(?:Month|Date|Time|Item|Name|Title|Type|Category|Price|Cost|Total|Amount|Qty|Quantity|Goal|Actual|Achv|Status|Note|Description|Key|Value|項目|名稱|標題|日期|時間|月份|類別|單價|數量|小計|總計|金額|狀態|備註|範例|建議|命中|順序|資料源)/i.test(row0Text);
-      let col1CountDigits = 0;
-      let col1Total = 0;
-      for (const row of rows) {
-        for (const cell of row) {
-          if (cell.x0 !== null && Math.abs(cell.x0 - columnBins[1].centerX) < Math.abs(cell.x0 - columnBins[0].centerX)) {
-            col1Total++;
-            if (/^[\d,.\s]+$/.test(cell.text.trim())) col1CountDigits++;
-          }
-        }
-      }
-      if (!hasHeaderKeyword && col1Total > 0 && col1CountDigits / col1Total >= 0.7) {
-        return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
-      }
-    }
-    const tsvLines = [];
-    for (const row of rows) {
-      const rowSlots = new Array(columnBins.length).fill("");
-      for (const cell of row) {
-        if (cell.x0 === null) continue;
-        let closestColIdx = 0;
-        let minDiff = Infinity;
-        for (let i = 0; i < columnBins.length; i++) {
-          const diff = Math.abs(cell.x0 - columnBins[i].centerX);
-          if (diff < minDiff) {
-            minDiff = diff;
-            closestColIdx = i;
-          }
-        }
-        if (rowSlots[closestColIdx]) {
-          rowSlots[closestColIdx] += " " + cell.text;
-        } else {
-          rowSlots[closestColIdx] = cell.text;
-        }
-      }
-      const cleanedRow = rowSlots.map((cellStr) => cleanTableCell(cellStr));
-      if (cleanedRow.some((c) => c.length > 0)) {
-        tsvLines.push(cleanedRow.join("	"));
-      }
-    }
-    return {
-      isTable: true,
-      tsv: tsvLines.join("\n"),
-      rowCount: tsvLines.length,
-      colCount: columnBins.length
-    };
-  }
-  function detectTableFromPlainText(text) {
-    if (!text || typeof text !== "string") {
-      return { isTable: false, tsv: text || "", rowCount: 0, colCount: 0 };
-    }
-    const rawLines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (rawLines.length < 2) {
-      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
-    }
-    if (rawLines.some((l) => isTimelineRow([{ text: l }]))) {
-      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
-    }
-    const hasTabs = rawLines.filter((l) => l.includes("	")).length >= Math.max(2, Math.floor(rawLines.length * 0.6));
-    const hasPipes = rawLines.filter((l) => (l.match(/\|/g) || []).length >= 2).length >= Math.max(2, Math.floor(rawLines.length * 0.6));
-    const parsedRows = [];
-    for (const line of rawLines) {
-      let tokens = [];
-      if (hasTabs && line.includes("	")) {
-        tokens = line.split("	");
-      } else if (hasPipes && line.includes("|")) {
-        tokens = line.split("|").map((t) => t.trim()).filter(Boolean);
-      } else if (/\s{2,}/.test(line)) {
-        tokens = line.split(/\s{2,}/);
-      } else {
-        tokens = [line];
-      }
-      tokens = tokens.map((t) => t.trim()).filter(Boolean);
-      if (tokens.length > 0) parsedRows.push(tokens);
-    }
-    const multiTokenRows = parsedRows.filter((r) => r.length >= 2);
-    if (multiTokenRows.length < 2 || multiTokenRows.length < Math.floor(parsedRows.length * 0.6)) {
-      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
-    }
-    const maxCols = Math.max(...multiTokenRows.map((r) => r.length));
-    if (!hasTabs && !hasPipes) {
-      if (maxCols < 3) {
-        return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
-      }
-      const uniformRows = parsedRows.filter((r) => r.length === maxCols);
-      if (uniformRows.length / parsedRows.length < 0.75) {
-        return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
-      }
-      const row0Text = parsedRows[0].join(" ");
-      const hasHeaderKeyword = /(?:Month|Date|Time|Item|Name|Title|Type|Category|Price|Cost|Total|Amount|Qty|Quantity|Goal|Actual|Achv|Status|Note|Description|Key|Value|項目|名稱|標題|日期|時間|月份|類別|單價|數量|小計|總計|金額|狀態|備註|範例|建議|命中|順序|資料源)/i.test(row0Text);
-      if (!hasHeaderKeyword) {
-        return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
-      }
-    }
-    const tsvLines = parsedRows.map((r) => {
-      const cleanedTokens = r.map((t) => cleanTableCell(t));
-      return cleanedTokens.join("	");
-    });
-    return {
-      isTable: true,
-      tsv: tsvLines.join("\n"),
-      rowCount: tsvLines.length,
-      colCount: maxCols
-    };
-  }
-  function processOcrTableOutput(cleanedText, rawOcrData = null) {
-    if (rawOcrData && Array.isArray(rawOcrData.lines) && rawOcrData.lines.length >= 2) {
-      const geoResult = detectTableFromTesseractResult(rawOcrData.lines);
-      if (geoResult.isTable && geoResult.tsv) {
-        return {
-          isTable: true,
-          text: geoResult.tsv,
-          rowCount: geoResult.rowCount,
-          colCount: geoResult.colCount
-        };
-      }
-    }
-    const plainResult = detectTableFromPlainText(cleanedText);
-    if (plainResult.isTable && plainResult.tsv) {
-      return {
-        isTable: true,
-        text: plainResult.tsv,
-        rowCount: plainResult.rowCount,
-        colCount: plainResult.colCount
-      };
-    }
-    return {
-      isTable: false,
-      text: cleanedText,
-      rowCount: 0,
-      colCount: 0
-    };
-  }
-  function isCjk(char) {
-    return /[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char);
-  }
-  function isTimelineRow(row) {
-    if (!Array.isArray(row)) return false;
-    const rowText = row.map((c) => c.text || "").join(" ");
-    const months = (rowText.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/gi) || []).length;
-    const cjkMonths = (rowText.match(/\b([1-9]|1[0-2])\s*月/g) || []).length;
-    const quarters = (rowText.match(/\bQ[1-4]\b/gi) || []).length;
-    return months >= 3 || cjkMonths >= 3 || quarters >= 3;
   }
 
   // src/content/shared/download-manager.js
@@ -4710,16 +4414,14 @@
         if (resp?.success && resp.text && resp.text.trim()) {
           const cleanText = cleanOcrText(resp.text);
           if (cleanText.length > 0) {
-            const tableResult = processOcrTableOutput(cleanText, resp.ocrData);
-            const textToCopy = tableResult.isTable ? tableResult.text : cleanText;
-            let copied = await copyTextToClipboard(textToCopy);
+            let copied = await copyTextToClipboard(cleanText);
             if (!copied) {
               try {
                 const copyResp = await new Promise((resolve) => {
                   chrome.runtime.sendMessage(
                     {
                       type: "copy-to-clipboard",
-                      text: textToCopy
+                      text: cleanText
                     },
                     (r) => resolve(r)
                   );
@@ -4729,11 +4431,7 @@
               }
             }
             cleanupCropButtonStates();
-            if (tableResult.isTable) {
-              uiToast(`\u{1F4CA} \u5DF2\u8FA8\u8B58\u8868\u683C\u7D50\u69CB\u4E26\u8907\u88FD\u70BA\u8A66\u7B97\u8868\u683C\u5F0F (TSV)\uFF01(${tableResult.rowCount} \u5217 \xD7 ${tableResult.colCount} \u6B04)`, 3500);
-            } else {
-              uiToast(`\u5DF2\u6210\u529F\u6383\u63CF\u4E26\u8907\u88FD\u6587\u5B57\u81F3\u526A\u8CBC\u7C3F\uFF01(${cleanText.length} \u5B57)`, 3500);
-            }
+            uiToast(`\u5DF2\u6210\u529F\u6383\u63CF\u4E26\u8907\u88FD\u6587\u5B57\u81F3\u526A\u8CBC\u7C3F\uFF01(${cleanText.length} \u5B57)`, 3500);
             return true;
           }
         }
@@ -5856,7 +5554,6 @@ ${selector} {
         Cs: batchDownloadAllImages,
         extractFormulaBarImageUrl,
         cleanOcrText,
-        processOcrTableOutput,
         Ir: getNetworkResourceUrls,
         Wr: scanSheetOverAndInCellImages,
         sn: handleToolbarAction,

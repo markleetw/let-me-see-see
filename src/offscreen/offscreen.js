@@ -51,7 +51,7 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     (async () => {
       try {
         const worker = await getTesseractWorker();
-        const segments = await getWideStripSegments(message.image, 20);
+        const segments = await getWideStripSegments(message.image, 12);
 
         let res = null;
         let lines = [];
@@ -60,9 +60,19 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
         if (segments && segments.length > 1) {
           const segLines = [];
           for (const segUrl of segments) {
-            const segRes = await worker.recognize(segUrl);
-            const l = extractLinesFromResult(segRes);
-            const t = l.join(" ") || (segRes?.data?.text || "").trim();
+            let segRes = await worker.recognize(segUrl);
+            let l = extractLinesFromResult(segRes);
+            let t = l.join(" ") || (segRes?.data?.text || "").trim();
+            if (!t && worker && typeof worker.setParameters === "function") {
+              try {
+                await worker.setParameters({ tessedit_pageseg_mode: "6" });
+                segRes = await worker.recognize(segUrl);
+                l = extractLinesFromResult(segRes);
+                t = l.join(" ") || (segRes?.data?.text || "").trim();
+              } finally {
+                await worker.setParameters({ tessedit_pageseg_mode: "3" });
+              }
+            }
             if (t) segLines.push(t);
           }
           text = segLines.join(" ");

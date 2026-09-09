@@ -123,8 +123,7 @@ export async function enhanceImageForOcr(imageSource) {
       }
     }
 
-    // 4. Contrast adjustment ONLY for inverted/dark background images
-    // Never modify contrast of light documents / spreadsheets to avoid washing out colored/yellow cells
+    // 4. Contrast adjustment for inverted/dark background images
     if (isDarkBackground) {
       const contrastFactor = 1.15;
       for (let y = pad; y < pad + targetH; y++) {
@@ -133,6 +132,34 @@ export async function enhanceImageForOcr(imageSource) {
           data[idx] = Math.min(255, Math.max(0, Math.round(((data[idx] - 128) * contrastFactor) + 128)));
           data[idx + 1] = Math.min(255, Math.max(0, Math.round(((data[idx + 1] - 128) * contrastFactor) + 128)));
           data[idx + 2] = Math.min(255, Math.max(0, Math.round(((data[idx + 2] - 128) * contrastFactor) + 128)));
+        }
+      }
+    } else if (needPadding) {
+      // For small cropped snippets with low/medium contrast (e.g. white text on photo background or gray numbers),
+      // stretch dynamic range to provide crisp separation for Otsu binarization
+      let minL = 255, maxL = 0;
+      for (let y = pad; y < pad + targetH; y++) {
+        for (let x = pad; x < pad + targetW; x++) {
+          const idx = (y * canvasW + x) * 4;
+          const luma = data[idx];
+          if (luma < minL) minL = luma;
+          if (luma > maxL) maxL = luma;
+        }
+      }
+      const range = maxL - minL;
+      if (range >= 35 && range <= 165) {
+        const isLightBorder = avgBorderLuma > 160;
+        for (let y = pad; y < pad + targetH; y++) {
+          for (let x = pad; x < pad + targetW; x++) {
+            const idx = (y * canvasW + x) * 4;
+            const norm = (data[idx] - minL) / range;
+            const stretched = isLightBorder
+              ? Math.min(255, Math.max(0, Math.round(norm * 255)))
+              : Math.round(Math.pow(norm, 1.6) * 255);
+            data[idx] = stretched;
+            data[idx + 1] = stretched;
+            data[idx + 2] = stretched;
+          }
         }
       }
     }
@@ -178,16 +205,16 @@ function loadImageElement(src) {
 
 /**
  * Split wide single-line horizontal strips at whitespace gaps to prevent Tesseract LSTM drift.
- * Triggered only for horizontal strips with width > 450px and height < 140px (aspect ratio >= 4.0).
+ * Triggered only for horizontal strips with width >= 320px and height <= 140px (aspect ratio >= 3.5).
  */
-export async function getWideStripSegments(imageSource, minGap = 20) {
+export async function getWideStripSegments(imageSource, minGap = 12) {
   try {
     const img = await loadImageElement(imageSource);
     if (!img || !img.width || !img.height) return null;
     const w = img.naturalWidth || img.width;
     const h = img.naturalHeight || img.height;
 
-    if (h > 140 || w < 450 || w / h < 4.0) {
+    if (h > 140 || w < 320 || w / h < 3.5) {
       return null;
     }
 
@@ -199,19 +226,24 @@ export async function getWideStripSegments(imageSource, minGap = 20) {
     ctx.drawImage(img, 0, 0);
     const data = ctx.getImageData(0, 0, w, h).data;
 
+    const startY = Math.min(3, Math.floor(h * 0.1));
+    const endY = Math.max(h - 3, Math.ceil(h * 0.9));
+    const totalSampled = Math.max(1, endY - startY);
+
     const whiteCols = [];
     for (let x = 0; x < w; x++) {
-      let isColWhite = true;
-      for (let y = 0; y < h; y++) {
+      let darkCount = 0;
+      for (let y = startY; y < endY; y++) {
         const idx = (y * w + x) * 4;
         if (data[idx + 3] < 30) continue;
         const luma = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-        if (luma < 215) {
-          isColWhite = false;
-          break;
+        if (luma < 205) {
+          darkCount++;
         }
       }
-      if (isColWhite) whiteCols.push(x);
+      if (darkCount <= Math.max(1, Math.floor(totalSampled * 0.08))) {
+        whiteCols.push(x);
+      }
     }
 
     const cutPoints = [];

@@ -20,8 +20,12 @@ export function cleanOcrText(text) {
       if (line.replace(/[\s._\-|/\\~:;+=*^]/g, "").length <= 1) continue;
     }
 
-    // 2. Filter out 3+ identical consecutive characters (e.g. 入入入入入, zzz, eee...)
-    if (/([^\s0-9])\1{2,}/i.test(line)) continue;
+    // 2. Filter out 3+ identical consecutive characters (e.g. 入入入入入, zzz, eee...) unless line has numeric or CJK context
+    if (/([^\s0-9\u4e00-\u9fa5])\1{2,}/i.test(line)) {
+      if (!/[0-9]{2,}|[\u4e00-\u9fa5]{2,}/.test(line)) {
+        continue;
+      }
+    }
 
     // 3. Filter out repeated 2-char token clusters (e.g. 入入, 玉玉, 生生, 國國)
     const cjkChars = line.replace(/[^\u4e00-\u9fa5]/g, "");
@@ -35,9 +39,12 @@ export function cleanOcrText(text) {
     }
 
     // 4. Filter out high density punctuation/symbol noise lines (e.g. es 、 、 ‧ ‧v,‧ ˊ〈b‧ˇ<zˇZzZ=”)
-    const cleanChars = line.replace(/\s+/g, "");
-    const puncCount = (cleanChars.match(/[\.,‧、ˊ〈〉ˇ<>=”"~_|\-+:;!@#$%^&*`]/g) || []).length;
-    if (cleanChars.length >= 6 && puncCount / cleanChars.length >= 0.35) continue;
+    // Do not filter out lines that have valid numbers, percentages, or currency
+    if (!/\d+[.,%]\d*|\bUS\$/.test(line)) {
+      const cleanChars = line.replace(/\s+/g, "");
+      const puncCount = (cleanChars.match(/[\.,‧、ˊ〈〉ˇ<>=”"~_|\-+:;!@#$%^&*`]/g) || []).length;
+      if (cleanChars.length >= 6 && puncCount / cleanChars.length >= 0.35) continue;
+    }
 
     // 5. Filter out stray fragments consisting solely of short 1-2 letter tokens and punctuation (e.g. "es es) re")
     const words = line.trim().split(/\s+/);
@@ -69,9 +76,9 @@ export function cleanOcrText(text) {
     line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:[a-zA-Z]{1,4}|[►▶>»~^"'\-]+|\s*[>▶►]\s*[a-zA-Z]?)*\s*[」』J]+/g, "$1」");
     line = line.replace(/[」』]{2,}/g, "」");
 
-    // Clean stray trailing ARR noise if remaining (and close quote if after CJK)
-    line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*ARR[a-zA-Z]*\s*$/gi, "$1」");
-    line = line.replace(/\s*["'“]*ARR[a-zA-Z]*\s*$/gi, "");
+    // Clean stray trailing ARR / RAR noise if remaining (and close quote if after CJK)
+    line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:ARR|RAR)[a-zA-Z]*\s*$/gi, "$1」");
+    line = line.replace(/\s*["'“]*(?:ARR|RAR)[a-zA-Z]*\s*$/gi, "");
 
     // Normalize spacing between quotes
     line = line.replace(/」\s*([「])/g, "」「");
@@ -82,6 +89,7 @@ export function cleanOcrText(text) {
     // Normalize Currency: usS, USS, us$, etc. -> US$
     line = line.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
     line = line.replace(/\busS\s*/g, "US$ ");
+    line = line.replace(/\bUDdd\b/gi, "");
 
     // Normalize Years & Dates: 202b/ -> 2026/, 2D2b/ -> 2026/, 2026108 -> 2026/08
     line = line.replace(/\b2[D0O]2[bB6]\/([0-1]\d)\b/g, "2026/$1");
@@ -95,11 +103,26 @@ export function cleanOcrText(text) {
       line = line.replace(/(?<!\/)\b([1-9]|1[0-2])\s*[bB](?![.%/\d])\b/g, "$1月");
     }
 
+    // Normalize English timeline months: e.g. "sep oct nov dec an feb mar" -> "jan feb mar"
+    if (/\b(?:sep|oct|nov|dec)\b/i.test(line) && /\bfeb\b/i.test(line)) {
+      line = line.replace(/\b(?:an|ian)\s+(?=feb\b)/gi, "jan ");
+    }
+    // Clean timeline year artifact "anne" -> "2026"
+    if (/\b(?:sep|oct|nov|dec|jan|feb|mar)\b/i.test(line) || line.trim() === "anne") {
+      line = line.replace(/\banne\b/gi, "2026");
+    }
+
     // Clean header chevrons and normalize CumulativeGap
     line = line.replace(/CumulativeGap\b/g, "Cumulative Gap");
     line = line.replace(/[»«▾▼►▶]/g, "");
     line = line.replace(/\bvy\b/gi, "");
     line = line.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
+
+    // Normalize S misrecognized for 3 before numbers (e.g. "S16" -> "316")
+    line = line.replace(/\b[sS](\d{2,})\b/g, "3$1");
+
+    // Clean OCR confusion for product marketing
+    line = line.replace(/\b(?:ford|prod)\s+marketing\b/gi, "product marketing");
 
     // Remove Gantt chart double pipe noise (e.g. "| |")
     line = line.replace(/\|\s+\|/g, " ");
@@ -221,14 +244,32 @@ export function disambiguateCjkCharacters(text) {
   val = val.replace(/百本[笑咲]/g, "百本筅");
   val = val.replace(/竹[笑咲]/g, "竹筅");
 
+  // Fix '抹茶硯' / '茶硯' -> '抹茶碗' / '茶碗'
+  val = val.replace(/抹茶[硯碗]/g, "抹茶碗");
+  val = val.replace(/茶[硯碗]/g, "茶碗");
+
   // Fix missing '片' before '口抹茶' (e.g. 「口抹茶碗推薦」 -> 「片口抹茶碗推薦」)
   val = val.replace(/(?<![\u4e00-\u9fa5])口抹茶/g, "片口抹茶");
 
   // Fix '質硬' falsely recognized where '質感' is intended (e.g. 質感雨具)
   val = val.replace(/質硬/g, "質感");
 
-  // Fix '十中圓舞曲' -> '雨中圓舞曲'
-  val = val.replace(/十中圓舞曲/g, "雨中圓舞曲");
+  // Fix '十中圓舞曲' / '兩[下中]圓舞曲' -> '雨中圓舞曲'
+  val = val.replace(/[十兩][中下]圓舞曲/g, "雨中圓舞曲");
+
+  // Fix '會[咱呼]吸的雨衣' -> '會呼吸的雨衣'
+  val = val.replace(/會[咱呼]吸/g, "會呼吸");
+
+  // Fix bag / apparel product terms:
+  val = val.replace(/輕量皮[革草單]/g, "輕量皮革");
+  val = val.replace(/皮[革草單]後背包/g, "皮革後背包");
+  val = val.replace(/皮[革草單]短夾/g, "皮革短夾");
+  val = val.replace(/兩[用月]托特包/g, "兩用托特包");
+  val = val.replace(/[迷送]你側背包/g, "迷你側背包");
+  val = val.replace(/托特帆布[包已]/g, "托特帆布包");
+  val = val.replace(/日本[直真]送中古包/g, "日本直送中古包");
+  val = val.replace(/(?:[寬廣]|RAW)\s*肩帶/g, "寬肩帶");
+  val = val.replace(/A4\s*帆布[包已]/g, "A4 帆布包");
 
   // 1. Fix '雨' falsely recognized where '兩' is the intended character:
   // e.g. "雨用" -> "兩用" (兩用托特包, 兩用後背包, 兩用手提包, 兩用包, 晴雨兩用)
@@ -237,8 +278,8 @@ export function disambiguateCjkCharacters(text) {
   val = val.replace(/雨([種者個款件組套面色岸難倍側旁端邊隻條位次張把台瓶盒度])/g, "兩$1");
 
   // 2. Fix '兩' falsely recognized where '雨' is the intended character:
-  // e.g. "兩衣" -> "雨衣", "兩傘" -> "雨傘", "兩靴" -> "雨靴"
-  val = val.replace(/兩([衣傘靴])/g, "雨$1");
+  // e.g. "兩衣" -> "雨衣", "兩傘" -> "雨傘", "兩靴" -> "雨靴", "兩鞋" -> "雨鞋"
+  val = val.replace(/兩([衣傘靴鞋具裙])/g, "雨$1");
   // e.g. "兩具" -> "雨具" (質感雨具, 防雨/雨具, 雨具, 雨衣)
   val = val.replace(/兩具/g, "雨具");
   // e.g. "兩中圓舞曲", "兩中漫步" -> "雨中圓舞曲", "雨中漫步"

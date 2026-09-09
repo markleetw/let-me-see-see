@@ -3786,7 +3786,11 @@
       if (validChars.length < 3 && /^[\s._\-|/\\~:;+=*^]+$/.test(line.replace(/[a-zA-Z0-9\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/g, ""))) {
         if (line.replace(/[\s._\-|/\\~:;+=*^]/g, "").length <= 1) continue;
       }
-      if (/([^\s0-9])\1{2,}/i.test(line)) continue;
+      if (/([^\s0-9\u4e00-\u9fa5])\1{2,}/i.test(line)) {
+        if (!/[0-9]{2,}|[\u4e00-\u9fa5]{2,}/.test(line)) {
+          continue;
+        }
+      }
       const cjkChars = line.replace(/[^\u4e00-\u9fa5]/g, "");
       if (cjkChars.length >= 6) {
         const isTimeline = /[0-9]\s*[年月日號週周季]/.test(line);
@@ -3795,9 +3799,11 @@
           if (unique / cjkChars.length < 0.45) continue;
         }
       }
-      const cleanChars = line.replace(/\s+/g, "");
-      const puncCount = (cleanChars.match(/[\.,‧、ˊ〈〉ˇ<>=”"~_|\-+:;!@#$%^&*`]/g) || []).length;
-      if (cleanChars.length >= 6 && puncCount / cleanChars.length >= 0.35) continue;
+      if (!/\d+[.,%]\d*|\bUS\$/.test(line)) {
+        const cleanChars = line.replace(/\s+/g, "");
+        const puncCount = (cleanChars.match(/[\.,‧、ˊ〈〉ˇ<>=”"~_|\-+:;!@#$%^&*`]/g) || []).length;
+        if (cleanChars.length >= 6 && puncCount / cleanChars.length >= 0.35) continue;
+      }
       const words = line.trim().split(/\s+/);
       if (words.length > 0 && words.every((w) => {
         if (words.length === 1 && /^(?:[A-Z0-9]{1,3}|No)$/.test(w)) {
@@ -3815,12 +3821,13 @@
       line = line.replace(/(?:^|\s+)\[(?=[\u4e00-\u9fa5])/g, "\u300C");
       line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:[a-zA-Z]{1,4}|[►▶>»~^"'\-]+|\s*[>▶►]\s*[a-zA-Z]?)*\s*[」』J]+/g, "$1\u300D");
       line = line.replace(/[」』]{2,}/g, "\u300D");
-      line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*ARR[a-zA-Z]*\s*$/gi, "$1\u300D");
-      line = line.replace(/\s*["'“]*ARR[a-zA-Z]*\s*$/gi, "");
+      line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:ARR|RAR)[a-zA-Z]*\s*$/gi, "$1\u300D");
+      line = line.replace(/\s*["'“]*(?:ARR|RAR)[a-zA-Z]*\s*$/gi, "");
       line = line.replace(/」\s*([「])/g, "\u300D\u300C");
       line = disambiguateCjkCharacters(line);
       line = line.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
       line = line.replace(/\busS\s*/g, "US$ ");
+      line = line.replace(/\bUDdd\b/gi, "");
       line = line.replace(/\b2[D0O]2[bB6]\/([0-1]\d)\b/g, "2026/$1");
       line = line.replace(/\b(20[12])[bB]\/([0-1][\dbB])\b/g, (m, y, mo) => y + "6/" + mo.replace(/[bB]/g, "6"));
       line = line.replace(/\b(20\d\d)[1l|I/]([0-1]\d)\b/g, "$1/$2");
@@ -3829,10 +3836,18 @@
         line = line.replace(/(10月\s+)(?:1|11|[|Il])(\s+12月)/g, "$111\u6708$2");
         line = line.replace(/(?<!\/)\b([1-9]|1[0-2])\s*[bB](?![.%/\d])\b/g, "$1\u6708");
       }
+      if (/\b(?:sep|oct|nov|dec)\b/i.test(line) && /\bfeb\b/i.test(line)) {
+        line = line.replace(/\b(?:an|ian)\s+(?=feb\b)/gi, "jan ");
+      }
+      if (/\b(?:sep|oct|nov|dec|jan|feb|mar)\b/i.test(line) || line.trim() === "anne") {
+        line = line.replace(/\banne\b/gi, "2026");
+      }
       line = line.replace(/CumulativeGap\b/g, "Cumulative Gap");
       line = line.replace(/[»«▾▼►▶]/g, "");
       line = line.replace(/\bvy\b/gi, "");
       line = line.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
+      line = line.replace(/\b[sS](\d{2,})\b/g, "3$1");
+      line = line.replace(/\b(?:ford|prod)\s+marketing\b/gi, "product marketing");
       line = line.replace(/\|\s+\|/g, " ");
       line = line.replace(/(\d)[|Il]+(?=[,\s\t]|$)/g, (m, d) => d + "1".repeat(m.length - 1));
       line = line.replace(/,[|Il]+(\d)/g, (m, d) => ",1" + d);
@@ -3868,12 +3883,24 @@
     val = val.replace(/[笑咲]座/g, "\u7B45\u5EA7");
     val = val.replace(/百本[笑咲]/g, "\u767E\u672C\u7B45");
     val = val.replace(/竹[笑咲]/g, "\u7AF9\u7B45");
+    val = val.replace(/抹茶[硯碗]/g, "\u62B9\u8336\u7897");
+    val = val.replace(/茶[硯碗]/g, "\u8336\u7897");
     val = val.replace(/(?<![\u4e00-\u9fa5])口抹茶/g, "\u7247\u53E3\u62B9\u8336");
     val = val.replace(/質硬/g, "\u8CEA\u611F");
-    val = val.replace(/十中圓舞曲/g, "\u96E8\u4E2D\u5713\u821E\u66F2");
+    val = val.replace(/[十兩][中下]圓舞曲/g, "\u96E8\u4E2D\u5713\u821E\u66F2");
+    val = val.replace(/會[咱呼]吸/g, "\u6703\u547C\u5438");
+    val = val.replace(/輕量皮[革草單]/g, "\u8F15\u91CF\u76AE\u9769");
+    val = val.replace(/皮[革草單]後背包/g, "\u76AE\u9769\u5F8C\u80CC\u5305");
+    val = val.replace(/皮[革草單]短夾/g, "\u76AE\u9769\u77ED\u593E");
+    val = val.replace(/兩[用月]托特包/g, "\u5169\u7528\u6258\u7279\u5305");
+    val = val.replace(/[迷送]你側背包/g, "\u8FF7\u4F60\u5074\u80CC\u5305");
+    val = val.replace(/托特帆布[包已]/g, "\u6258\u7279\u5E06\u5E03\u5305");
+    val = val.replace(/日本[直真]送中古包/g, "\u65E5\u672C\u76F4\u9001\u4E2D\u53E4\u5305");
+    val = val.replace(/(?:[寬廣]|RAW)\s*肩帶/g, "\u5BEC\u80A9\u5E36");
+    val = val.replace(/A4\s*帆布[包已]/g, "A4 \u5E06\u5E03\u5305");
     val = val.replace(/雨用/g, "\u5169\u7528");
     val = val.replace(/雨([種者個款件組套面色岸難倍側旁端邊隻條位次張把台瓶盒度])/g, "\u5169$1");
-    val = val.replace(/兩([衣傘靴])/g, "\u96E8$1");
+    val = val.replace(/兩([衣傘靴鞋具裙])/g, "\u96E8$1");
     val = val.replace(/兩具/g, "\u96E8\u5177");
     val = val.replace(/兩中([圓漫步曲景情風])/g, "\u96E8\u4E2D$1");
     val = val.replace(/([防避淋梅暴陣雷下落細微大晴])兩/g, "$1\u96E8");

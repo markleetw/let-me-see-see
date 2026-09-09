@@ -200,6 +200,30 @@
             data[idx + 2] = Math.min(255, Math.max(0, Math.round((data[idx + 2] - 128) * contrastFactor + 128)));
           }
         }
+      } else if (needPadding) {
+        let minL = 255, maxL = 0;
+        for (let y = pad; y < pad + targetH; y++) {
+          for (let x = pad; x < pad + targetW; x++) {
+            const idx = (y * canvasW + x) * 4;
+            const luma = data[idx];
+            if (luma < minL) minL = luma;
+            if (luma > maxL) maxL = luma;
+          }
+        }
+        const range = maxL - minL;
+        if (range >= 35 && range <= 165) {
+          const isLightBorder = avgBorderLuma > 160;
+          for (let y = pad; y < pad + targetH; y++) {
+            for (let x = pad; x < pad + targetW; x++) {
+              const idx = (y * canvasW + x) * 4;
+              const norm = (data[idx] - minL) / range;
+              const stretched = isLightBorder ? Math.min(255, Math.max(0, Math.round(norm * 255))) : Math.round(Math.pow(norm, 1.6) * 255);
+              data[idx] = stretched;
+              data[idx + 1] = stretched;
+              data[idx + 2] = stretched;
+            }
+          }
+        }
       }
       if (pad > 0) {
         for (let y = 0; y < canvasH; y++) {
@@ -233,13 +257,13 @@
       img.src = src;
     });
   }
-  async function getWideStripSegments(imageSource, minGap = 20) {
+  async function getWideStripSegments(imageSource, minGap = 12) {
     try {
       const img = await loadImageElement(imageSource);
       if (!img || !img.width || !img.height) return null;
       const w = img.naturalWidth || img.width;
       const h = img.naturalHeight || img.height;
-      if (h > 140 || w < 450 || w / h < 4) {
+      if (h > 140 || w < 320 || w / h < 3.5) {
         return null;
       }
       const cvs = document.createElement("canvas");
@@ -249,19 +273,23 @@
       if (!ctx) return null;
       ctx.drawImage(img, 0, 0);
       const data = ctx.getImageData(0, 0, w, h).data;
+      const startY = Math.min(3, Math.floor(h * 0.1));
+      const endY = Math.max(h - 3, Math.ceil(h * 0.9));
+      const totalSampled = Math.max(1, endY - startY);
       const whiteCols = [];
       for (let x = 0; x < w; x++) {
-        let isColWhite = true;
-        for (let y = 0; y < h; y++) {
+        let darkCount = 0;
+        for (let y = startY; y < endY; y++) {
           const idx = (y * w + x) * 4;
           if (data[idx + 3] < 30) continue;
           const luma = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-          if (luma < 215) {
-            isColWhite = false;
-            break;
+          if (luma < 205) {
+            darkCount++;
           }
         }
-        if (isColWhite) whiteCols.push(x);
+        if (darkCount <= Math.max(1, Math.floor(totalSampled * 0.08))) {
+          whiteCols.push(x);
+        }
       }
       const cutPoints = [];
       let curStart = null;
@@ -359,16 +387,26 @@
         (async () => {
           try {
             const worker = await getTesseractWorker();
-            const segments = await getWideStripSegments(message.image, 20);
+            const segments = await getWideStripSegments(message.image, 12);
             let res = null;
             let lines = [];
             let text = "";
             if (segments && segments.length > 1) {
               const segLines = [];
               for (const segUrl of segments) {
-                const segRes = await worker.recognize(segUrl);
-                const l = extractLinesFromResult(segRes);
-                const t = l.join(" ") || (segRes?.data?.text || "").trim();
+                let segRes = await worker.recognize(segUrl);
+                let l = extractLinesFromResult(segRes);
+                let t = l.join(" ") || (segRes?.data?.text || "").trim();
+                if (!t && worker && typeof worker.setParameters === "function") {
+                  try {
+                    await worker.setParameters({ tessedit_pageseg_mode: "6" });
+                    segRes = await worker.recognize(segUrl);
+                    l = extractLinesFromResult(segRes);
+                    t = l.join(" ") || (segRes?.data?.text || "").trim();
+                  } finally {
+                    await worker.setParameters({ tessedit_pageseg_mode: "3" });
+                  }
+                }
                 if (t) segLines.push(t);
               }
               text = segLines.join(" ");

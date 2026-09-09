@@ -41,7 +41,7 @@ export function cleanOcrText(text) {
 
     // 5. Filter out stray fragments consisting solely of short 1-2 letter tokens and punctuation (e.g. "es es) re")
     const words = line.trim().split(/\s+/);
-    if (words.length > 0 && words.every(w => {
+    if (words.length > 1 && words.every(w => {
       const letters = w.replace(/[^a-zA-Z]/g, "");
       return letters.length > 0 && letters.length <= 2 && !/[0-9\u4e00-\u9fa5]/.test(w);
     })) {
@@ -116,4 +116,18 @@ export function cleanOcrText(text) {
   }
 
   return cleaned.join("\n").trim();
+}
+
+/**
+ * Sanitize an individual table cell value while preserving single letters/numbers.
+ */
+export function cleanTableCell(text) {
+  if (!text) return "";
+  let val = text.trim();
+  val = val.replace(/[|\t\r\n]+/g, " ").trim();
+  val = val.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
+  val = val.replace(/\busS\s*/g, "US$ ");
+  const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
+  val = val.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
+  return val;
 }

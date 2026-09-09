@@ -3666,7 +3666,7 @@
       const puncCount = (cleanChars.match(/[\.,‧、ˊ〈〉ˇ<>=”"~_|\-+:;!@#$%^&*`]/g) || []).length;
       if (cleanChars.length >= 6 && puncCount / cleanChars.length >= 0.35) continue;
       const words = line.trim().split(/\s+/);
-      if (words.length > 0 && words.every((w) => {
+      if (words.length > 1 && words.every((w) => {
         const letters = w.replace(/[^a-zA-Z]/g, "");
         return letters.length > 0 && letters.length <= 2 && !/[0-9\u4e00-\u9fa5]/.test(w);
       })) {
@@ -3714,6 +3714,189 @@
       cleaned.push(line);
     }
     return cleaned.join("\n").trim();
+  }
+  function cleanTableCell(text) {
+    if (!text) return "";
+    let val = text.trim();
+    val = val.replace(/[|\t\r\n]+/g, " ").trim();
+    val = val.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
+    val = val.replace(/\busS\s*/g, "US$ ");
+    const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
+    val = val.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
+    return val;
+  }
+
+  // src/content/ocr/table-detector.js
+  function findColumnBins(rows, tolerance = 35) {
+    const allXStarts = [];
+    for (const row of rows) {
+      for (const cell of row) {
+        if (typeof cell.x0 === "number") {
+          allXStarts.push(cell.x0);
+        }
+      }
+    }
+    if (allXStarts.length === 0) return [];
+    allXStarts.sort((a, b) => a - b);
+    const clusters = [];
+    for (const x of allXStarts) {
+      const matched = clusters.find((c) => Math.abs(c.mean - x) <= tolerance);
+      if (matched) {
+        matched.points.push(x);
+        matched.mean = matched.points.reduce((sum, v) => sum + v, 0) / matched.points.length;
+        matched.min = Math.min(matched.min, x);
+        matched.max = Math.max(matched.max, x);
+      } else {
+        clusters.push({ points: [x], mean: x, min: x, max: x });
+      }
+    }
+    return clusters.filter((c) => c.points.length >= 2).sort((a, b) => a.mean - b.mean).map((c) => ({
+      centerX: c.mean,
+      minX: c.min,
+      maxX: c.max
+    }));
+  }
+  function detectTableFromTesseractResult(rawLines) {
+    if (!Array.isArray(rawLines) || rawLines.length < 2) {
+      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+    }
+    const rows = [];
+    for (const line of rawLines) {
+      const validWords = (line.words || []).filter((w) => {
+        const t = (w.text || "").trim();
+        return t && !/^[|—_\-]+$/.test(t);
+      });
+      if (!validWords.length) continue;
+      const lineCells = [];
+      let currentCell = null;
+      for (const w of validWords) {
+        const wText = (w.text || "").trim();
+        const x0 = w.bbox ? w.bbox.x0 : null;
+        const x1 = w.bbox ? w.bbox.x1 : null;
+        if (!currentCell) {
+          currentCell = { text: wText, x0, x1 };
+        } else if (x0 !== null && currentCell.x1 !== null && x0 - currentCell.x1 <= 24) {
+          currentCell.text += (isCjk(currentCell.text.slice(-1)) && isCjk(wText.charAt(0)) ? "" : " ") + wText;
+          currentCell.x1 = Math.max(currentCell.x1, x1);
+        } else {
+          lineCells.push(currentCell);
+          currentCell = { text: wText, x0, x1 };
+        }
+      }
+      if (currentCell) lineCells.push(currentCell);
+      if (lineCells.length > 0) rows.push(lineCells);
+    }
+    if (rows.length < 2) {
+      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+    }
+    const columnBins = findColumnBins(rows);
+    const multiColRows = rows.filter((r) => r.length >= 2);
+    const isTable = columnBins.length >= 2 && multiColRows.length >= Math.max(2, Math.floor(rows.length * 0.5));
+    if (!isTable) {
+      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+    }
+    const tsvLines = [];
+    for (const row of rows) {
+      const rowSlots = new Array(columnBins.length).fill("");
+      for (const cell of row) {
+        if (cell.x0 === null) continue;
+        let closestColIdx = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < columnBins.length; i++) {
+          const diff = Math.abs(cell.x0 - columnBins[i].centerX);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestColIdx = i;
+          }
+        }
+        if (rowSlots[closestColIdx]) {
+          rowSlots[closestColIdx] += " " + cell.text;
+        } else {
+          rowSlots[closestColIdx] = cell.text;
+        }
+      }
+      const cleanedRow = rowSlots.map((cellStr) => cleanTableCell(cellStr));
+      if (cleanedRow.some((c) => c.length > 0)) {
+        tsvLines.push(cleanedRow.join("	"));
+      }
+    }
+    return {
+      isTable: true,
+      tsv: tsvLines.join("\n"),
+      rowCount: tsvLines.length,
+      colCount: columnBins.length
+    };
+  }
+  function detectTableFromPlainText(text) {
+    if (!text || typeof text !== "string") {
+      return { isTable: false, tsv: text || "", rowCount: 0, colCount: 0 };
+    }
+    const rawLines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (rawLines.length < 3) {
+      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+    }
+    const parsedRows = [];
+    for (const line of rawLines) {
+      let tokens = [];
+      if (line.includes("	")) {
+        tokens = line.split("	");
+      } else if (line.includes("|")) {
+        tokens = line.split("|").map((t) => t.trim()).filter(Boolean);
+      } else if (/\s{2,}/.test(line)) {
+        tokens = line.split(/\s{2,}/);
+      } else {
+        tokens = [line];
+      }
+      tokens = tokens.map((t) => t.trim()).filter(Boolean);
+      if (tokens.length > 0) parsedRows.push(tokens);
+    }
+    const multiTokenRows = parsedRows.filter((r) => r.length >= 2);
+    const isTable = multiTokenRows.length >= 3 && multiTokenRows.length >= Math.floor(parsedRows.length * 0.6);
+    if (!isTable) {
+      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+    }
+    const maxCols = Math.max(...multiTokenRows.map((r) => r.length));
+    const tsvLines = parsedRows.map((r) => {
+      const cleanedTokens = r.map((t) => cleanTableCell(t));
+      return cleanedTokens.join("	");
+    });
+    return {
+      isTable: true,
+      tsv: tsvLines.join("\n"),
+      rowCount: tsvLines.length,
+      colCount: maxCols
+    };
+  }
+  function processOcrTableOutput(cleanedText, rawOcrData = null) {
+    if (rawOcrData && Array.isArray(rawOcrData.lines) && rawOcrData.lines.length >= 2) {
+      const geoResult = detectTableFromTesseractResult(rawOcrData.lines);
+      if (geoResult.isTable && geoResult.tsv) {
+        return {
+          isTable: true,
+          text: geoResult.tsv,
+          rowCount: geoResult.rowCount,
+          colCount: geoResult.colCount
+        };
+      }
+    }
+    const plainResult = detectTableFromPlainText(cleanedText);
+    if (plainResult.isTable && plainResult.tsv) {
+      return {
+        isTable: true,
+        text: plainResult.tsv,
+        rowCount: plainResult.rowCount,
+        colCount: plainResult.colCount
+      };
+    }
+    return {
+      isTable: false,
+      text: cleanedText,
+      rowCount: 0,
+      colCount: 0
+    };
+  }
+  function isCjk(char) {
+    return /[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char);
   }
 
   // src/content/shared/download-manager.js
@@ -4204,14 +4387,16 @@
         if (resp?.success && resp.text && resp.text.trim()) {
           const cleanText = cleanOcrText(resp.text);
           if (cleanText.length > 0) {
-            let copied = await copyTextToClipboard(cleanText);
+            const tableResult = processOcrTableOutput(cleanText, resp.ocrData);
+            const textToCopy = tableResult.isTable ? tableResult.text : cleanText;
+            let copied = await copyTextToClipboard(textToCopy);
             if (!copied) {
               try {
                 const copyResp = await new Promise((resolve) => {
                   chrome.runtime.sendMessage(
                     {
                       type: "copy-to-clipboard",
-                      text: cleanText
+                      text: textToCopy
                     },
                     (r) => resolve(r)
                   );
@@ -4220,7 +4405,11 @@
               } catch {
               }
             }
-            uiToast(`\u5DF2\u6210\u529F\u6383\u63CF\u4E26\u8907\u88FD\u6587\u5B57\u81F3\u526A\u8CBC\u7C3F\uFF01(${cleanText.length} \u5B57)`, 3500);
+            if (tableResult.isTable) {
+              uiToast(`\u{1F4CA} \u5DF2\u8FA8\u8B58\u8868\u683C\u7D50\u69CB\u4E26\u8907\u88FD\u70BA\u8A66\u7B97\u8868\u683C\u5F0F (TSV)\uFF01(${tableResult.rowCount} \u5217 \xD7 ${tableResult.colCount} \u6B04)`, 3500);
+            } else {
+              uiToast(`\u5DF2\u6210\u529F\u6383\u63CF\u4E26\u8907\u88FD\u6587\u5B57\u81F3\u526A\u8CBC\u7C3F\uFF01(${cleanText.length} \u5B57)`, 3500);
+            }
             return true;
           }
         }
@@ -5194,6 +5383,7 @@ ${selector} {
         Cs: batchDownloadAllImages,
         extractFormulaBarImageUrl,
         cleanOcrText,
+        processOcrTableOutput,
         Ir: getNetworkResourceUrls,
         Wr: scanSheetOverAndInCellImages,
         sn: handleToolbarAction,

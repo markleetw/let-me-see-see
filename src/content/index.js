@@ -11,6 +11,7 @@ import { openViewerLightbox } from "./ui/viewer-lightbox.js";
 import { uiToast } from "./ui/toast.js";
 import { ocrImageToText } from "./ocr/ocr-service.js";
 import { cleanOcrText } from "./ocr/text-cleaner.js";
+import { processOcrTableOutput } from "./ocr/table-detector.js";
 import { copyTextToClipboard, copyImageToClipboard, copyImageBlobToClipboard } from "./shared/clipboard.js";
 import { sanitizeFilename, downloadSingleImage, packImagesToZip } from "./shared/download-manager.js";
 import { getNetworkResourceUrls } from "./shared/network-resources.js";
@@ -168,6 +169,7 @@ export function bootstrap() {
       Cs: batchDownloadAllImages,
       extractFormulaBarImageUrl,
       cleanOcrText,
+      processOcrTableOutput,
       Ir: getNetworkResourceUrls,
       Wr: scanSheetOverAndInCellImages,
       sn: handleToolbarAction,

@@ -147,7 +147,16 @@
           if (!text && res?.data?.text) {
             text = res.data.text;
           }
-          sendResponse({ success: true, text });
+          const structuredLines = (res?.data?.lines || []).map((l) => ({
+            text: l.text,
+            bbox: l.bbox ? { x0: l.bbox.x0, y0: l.bbox.y0, x1: l.bbox.x1, y1: l.bbox.y1 } : null,
+            words: (l.words || []).map((w) => ({
+              text: w.text,
+              confidence: w.confidence,
+              bbox: w.bbox ? { x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 } : null
+            }))
+          }));
+          sendResponse({ success: true, text, ocrData: { lines: structuredLines } });
         } catch (err) {
           console.error("[Offscreen OCR Error]", err);
           sendResponse({ success: false, error: err?.message || String(err) });

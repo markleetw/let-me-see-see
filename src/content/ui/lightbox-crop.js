@@ -119,6 +119,11 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
 
   container.classList.add("lmss-crop-active");
 
+  // Create crop overlay covering the entire viewport to intercept all pointer events
+  const overlay = document.createElement("div");
+  overlay.className = "lmss-crop-overlay";
+  container.appendChild(overlay);
+
   // Create crop hint banner
   const hintBanner = document.createElement("div");
   hintBanner.className = "lmss-crop-hint";
@@ -129,18 +134,18 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
   `;
   container.appendChild(hintBanner);
 
-  // Create selection box element
+  // Create selection box element inside overlay
   const box = document.createElement("div");
   box.className = "lmss-crop-box";
   box.style.display = "none";
-  container.appendChild(box);
+  overlay.appendChild(box);
 
   let isDragging = false;
   let startX = 0;
   let startY = 0;
   let rafId = null;
 
-  const onMouseDown = (e) => {
+  const onDragStart = (e) => {
     // Ignore clicks on toolbar or hint banner
     if (e.target.closest(".viewer-toolbar, .lmss-crop-hint, .viewer-button")) return;
     e.preventDefault();
@@ -157,9 +162,10 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
     box.style.display = "block";
   };
 
-  const onMouseMove = (e) => {
+  const onDragMove = (e) => {
     if (!isDragging) return;
     e.preventDefault();
+    e.stopPropagation();
 
     const curX = e.clientX;
     const curY = e.clientY;
@@ -178,8 +184,10 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
     });
   };
 
-  const onMouseUp = (e) => {
+  const onDragEnd = (e) => {
     if (!isDragging) return;
+    e.preventDefault();
+    e.stopPropagation();
     isDragging = false;
     if (rafId) {
       cancelAnimationFrame(rafId);
@@ -232,18 +240,24 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
     }
     container.classList.remove("lmss-crop-active");
     hintBanner.remove();
-    box.remove();
-    window.removeEventListener("mousemove", onMouseMove, true);
-    window.removeEventListener("mouseup", onMouseUp, true);
-    canvasEl.removeEventListener("mousedown", onMouseDown, true);
+    overlay.remove();
+    window.removeEventListener("pointermove", onDragMove, true);
+    window.removeEventListener("pointerup", onDragEnd, true);
+    window.removeEventListener("mousemove", onDragMove, true);
+    window.removeEventListener("mouseup", onDragEnd, true);
+    overlay.removeEventListener("pointerdown", onDragStart, true);
+    overlay.removeEventListener("mousedown", onDragStart, true);
     window.removeEventListener("keydown", onKeyDown, true);
     activeCropCleanup = null;
   };
 
   activeCropCleanup = cleanup;
   hintBanner.querySelector(".lmss-crop-hint-close").addEventListener("click", cleanup);
-  canvasEl.addEventListener("mousedown", onMouseDown, true);
-  window.addEventListener("mousemove", onMouseMove, true);
-  window.addEventListener("mouseup", onMouseUp, true);
+  overlay.addEventListener("pointerdown", onDragStart, true);
+  overlay.addEventListener("mousedown", onDragStart, true);
+  window.addEventListener("pointermove", onDragMove, true);
+  window.addEventListener("pointerup", onDragEnd, true);
+  window.addEventListener("mousemove", onDragMove, true);
+  window.addEventListener("mouseup", onDragEnd, true);
   window.addEventListener("keydown", onKeyDown, true);
 }

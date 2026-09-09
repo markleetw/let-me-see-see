@@ -22,7 +22,10 @@ export function extractLinesFromResult(result) {
       const validWords = line.words.filter((w) => {
         if (typeof w.confidence !== "number") return true;
         const txt = (w.text || "").trim();
-        return txt.length <= 1 ? w.confidence >= 50 : w.confidence >= (hasValidTokens ? 35 : 45);
+        const wordHasCjk = /[\u4e00-\u9fa5]/.test(txt);
+        if (wordHasCjk) return w.confidence >= 35;
+        if (txt.length <= 1) return w.confidence >= 50;
+        return w.confidence >= (hasValidTokens ? 35 : 45);
       });
 
       if (validWords.length === 0) continue;

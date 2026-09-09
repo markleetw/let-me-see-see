@@ -226,6 +226,7 @@ test("Unit: Lightbox Image Crop Bounds & Coordinate Mapping", async (t) => {
           className: "",
           style: {},
           querySelector: () => ({ addEventListener: () => {} }),
+          appendChild: () => {},
           remove: () => {
             const idx = children.indexOf(element);
             if (idx !== -1) children.splice(idx, 1);
@@ -233,6 +234,11 @@ test("Unit: Lightbox Image Crop Bounds & Coordinate Mapping", async (t) => {
           addEventListener: (type, fn) => {
             if (!elListeners.has(type)) elListeners.set(type, []);
             elListeners.get(type).push(fn);
+          },
+          removeEventListener: (type, fn) => {
+            if (elListeners.has(type)) {
+              elListeners.set(type, elListeners.get(type).filter((f) => f !== fn));
+            }
           }
         };
         return element;

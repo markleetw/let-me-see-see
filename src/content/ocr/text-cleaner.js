@@ -41,7 +41,10 @@ export function cleanOcrText(text) {
 
     // 5. Filter out stray fragments consisting solely of short 1-2 letter tokens and punctuation (e.g. "es es) re")
     const words = line.trim().split(/\s+/);
-    if (words.length > 1 && words.every(w => {
+    if (words.length > 0 && words.every(w => {
+      if (words.length === 1 && /^(?:[A-Z0-9]{1,3}|No)$/.test(w)) {
+        return false;
+      }
       const letters = w.replace(/[^a-zA-Z]/g, "");
       return letters.length > 0 && letters.length <= 2 && !/[0-9\u4e00-\u9fa5]/.test(w);
     })) {
@@ -124,10 +127,52 @@ export function cleanOcrText(text) {
 export function cleanTableCell(text) {
   if (!text) return "";
   let val = text.trim();
-  val = val.replace(/[|\t\r\n]+/g, " ").trim();
+  val = val.replace(/[\t\r\n]+/g, " ").trim();
+
+  // Normalize Currency: usS, USS, us$, etc. -> US$
   val = val.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
   val = val.replace(/\busS\s*/g, "US$ ");
+
+  // Normalize Years & Dates: 202b/ -> 2026/, 2D2b/ -> 2026/, 2026108 -> 2026/08
+  val = val.replace(/\b2[D0O]2[bB6]\/([0-1]\d)\b/g, "2026/$1");
+  val = val.replace(/\b(20[12])[bB]\/([0-1][\dbB])\b/g, (m, y, mo) => y + "6/" + mo.replace(/[bB]/g, "6"));
+  val = val.replace(/\b(20\d\d)[1l|I/]([0-1]\d)\b/g, "$1/$2");
+
+  // Clean header chevrons and normalize CumulativeGap
+  val = val.replace(/CumulativeGap\b/g, "Cumulative Gap");
+  val = val.replace(/[»«▾▼]/g, "");
+  val = val.replace(/\bvy\b/gi, "");
+  val = val.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
+
+  // Normalize Numbers & Financial amounts:
+  val = val.replace(/(\d)[|Il](\d)/g, "$11$2");
+  val = val.replace(/(\d)[|Il],/g, "$11,");
+  val = val.replace(/,[|Il](\d)/g, ",1$1");
+  val = val.replace(/\b[|Il](\d)/g, "1$1");
+  val = val.replace(/(\d)[|Il]\b/g, "$11");
+  val = val.replace(/-\s*[|Il]\s*/g, "-1");
+
+  val = val.replace(/(\d)[bB](\d)/g, "$16$2");
+  val = val.replace(/(\d)[bB],/g, "$16,");
+  val = val.replace(/,[bB](\d)/g, ",6$1");
+  val = val.replace(/\b[bB](\d)/g, "6$1");
+  val = val.replace(/(\d)[bB]\b/g, "$16");
+  val = val.replace(/(\d)[bB]\./g, "$16.");
+  val = val.replace(/\.([bB])(\d)/g, ".6$2");
+  val = val.replace(/(\d)[bB]%/g, "$16%");
+
+  val = val.replace(/(\d)[oO](\d)/g, "$10$2");
+  val = val.replace(/,[oO](\d)/g, ",0$1");
+  val = val.replace(/(\d)[oO],/g, "$10,");
+  val = val.replace(/(\d)[oO]%/g, "$10%");
+
+  // Remove stray standalone pipes
+  val = val.replace(/\|+/g, " ").trim();
+
+  // Clean stray negative spaces: e.g. "-1 b,o34" -> "-16,034"
+  val = val.replace(/-(\d+)\s+([0-9bBoO]+),/g, "-$1$2,");
+
   const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
   val = val.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
-  return val;
+  return val.trim();
 }

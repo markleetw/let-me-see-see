@@ -103,17 +103,65 @@ export function detectTableFromTesseractResult(rawLines) {
     return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
   }
 
+  // Reject timelines, roadmaps, and Gantt charts with month/quarter axes
+  if (rows.some(isTimelineRow)) {
+    return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+  }
+
   // 2. Identify column alignment bins
   const columnBins = findColumnBins(rows);
-
-  // Table Criteria:
-  // - At least 2 columns identified
-  // - At least 60% of rows contain 2 or more distinct columns
-  const multiColRows = rows.filter((r) => r.length >= 2);
-  const isTable = columnBins.length >= 2 && multiColRows.length >= Math.max(2, Math.floor(rows.length * 0.5));
-
-  if (!isTable) {
+  if (columnBins.length < 2) {
     return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+  }
+
+  // Check occupancy for each column across rows
+  const colOccupancy = new Array(columnBins.length).fill(0);
+  for (const row of rows) {
+    const presentBins = new Set();
+    for (const cell of row) {
+      if (cell.x0 === null) continue;
+      let closestColIdx = 0;
+      let minDiff = Infinity;
+      for (let i = 0; i < columnBins.length; i++) {
+        const diff = Math.abs(cell.x0 - columnBins[i].centerX);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestColIdx = i;
+        }
+      }
+      presentBins.add(closestColIdx);
+    }
+    for (const idx of presentBins) {
+      colOccupancy[idx]++;
+    }
+  }
+
+  // A genuine table requires columns to be populated consistently across rows
+  // At least 2 columns must appear in at least 55% of rows
+  const highOccupancyCols = colOccupancy.filter((cnt) => cnt >= Math.max(2, Math.floor(rows.length * 0.55)));
+  if (highOccupancyCols.length < 2) {
+    return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+  }
+
+  // For 2-column candidates: guard against search autocomplete / item count lists (e.g. "雨靴 316", "雨衣 2,018")
+  if (columnBins.length === 2) {
+    const row0Text = rows[0].map((c) => c.text).join(" ");
+    const hasHeaderKeyword = /^(?:Month|Date|Time|Item|Name|Title|Type|Category|Price|Cost|Total|Amount|Qty|Quantity|Goal|Actual|Achv|Status|Note|Description|Key|Value|項目|名稱|標題|日期|時間|月份|類別|單價|數量|小計|總計|金額|狀態|備註|範例|建議|命中|順序|資料源)/i.test(row0Text);
+
+    let col1CountDigits = 0;
+    let col1Total = 0;
+    for (const row of rows) {
+      for (const cell of row) {
+        if (cell.x0 !== null && Math.abs(cell.x0 - columnBins[1].centerX) < Math.abs(cell.x0 - columnBins[0].centerX)) {
+          col1Total++;
+          if (/^[\d,.\s]+$/.test(cell.text.trim())) col1CountDigits++;
+        }
+      }
+    }
+
+    if (!hasHeaderKeyword && col1Total > 0 && col1CountDigits / col1Total >= 0.7) {
+      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+    }
   }
 
   // 3. Format into TSV
@@ -159,7 +207,7 @@ export function detectTableFromTesseractResult(rawLines) {
 
 /**
  * Text-based table detection fallback (when bounding boxes are absent)
- * Inspects line token patterns, multi-space delimiters, and consistent field counts.
+ * Inspects explicit tab or markdown table pipe delimiters.
  * @param {string} text
  * @returns {{isTable: boolean, tsv: string, rowCount: number, colCount: number}}
  */
@@ -169,18 +217,24 @@ export function detectTableFromPlainText(text) {
   }
 
   const rawLines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (rawLines.length < 3) {
+  if (rawLines.length < 2) {
     return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
   }
 
-  // Check if lines are delimited by tabs or 2+ spaces or pipes
+  // Reject timeline rows
+  if (rawLines.some((l) => isTimelineRow([{ text: l }]))) {
+    return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+  }
+
+  const hasTabs = rawLines.filter((l) => l.includes("\t")).length >= Math.max(2, Math.floor(rawLines.length * 0.6));
+  const hasPipes = rawLines.filter((l) => (l.match(/\|/g) || []).length >= 2).length >= Math.max(2, Math.floor(rawLines.length * 0.6));
+
   const parsedRows = [];
   for (const line of rawLines) {
-    // Delimiter check: pipe '|', tab '\t', or 2+ consecutive spaces
     let tokens = [];
-    if (line.includes("\t")) {
+    if (hasTabs && line.includes("\t")) {
       tokens = line.split("\t");
-    } else if (line.includes("|")) {
+    } else if (hasPipes && line.includes("|")) {
       tokens = line.split("|").map((t) => t.trim()).filter(Boolean);
     } else if (/\s{2,}/.test(line)) {
       tokens = line.split(/\s{2,}/);
@@ -192,13 +246,29 @@ export function detectTableFromPlainText(text) {
   }
 
   const multiTokenRows = parsedRows.filter((r) => r.length >= 2);
-  const isTable = multiTokenRows.length >= 3 && multiTokenRows.length >= Math.floor(parsedRows.length * 0.6);
-
-  if (!isTable) {
+  if (multiTokenRows.length < 2 || multiTokenRows.length < Math.floor(parsedRows.length * 0.6)) {
     return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
   }
 
   const maxCols = Math.max(...multiTokenRows.map((r) => r.length));
+
+  // If delimited merely by multi-spaces (no tabs or pipes):
+  // Require at least 3 columns, high column count uniformity across rows, and header keyword
+  if (!hasTabs && !hasPipes) {
+    if (maxCols < 3) {
+      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+    }
+    const uniformRows = parsedRows.filter((r) => r.length === maxCols);
+    if (uniformRows.length / parsedRows.length < 0.75) {
+      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+    }
+    const row0Text = parsedRows[0].join(" ");
+    const hasHeaderKeyword = /(?:Month|Date|Time|Item|Name|Title|Type|Category|Price|Cost|Total|Amount|Qty|Quantity|Goal|Actual|Achv|Status|Note|Description|Key|Value|項目|名稱|標題|日期|時間|月份|類別|單價|數量|小計|總計|金額|狀態|備註|範例|建議|命中|順序|資料源)/i.test(row0Text);
+    if (!hasHeaderKeyword) {
+      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+    }
+  }
+
   const tsvLines = parsedRows.map((r) => {
     const cleanedTokens = r.map((t) => cleanTableCell(t));
     return cleanedTokens.join("\t");
@@ -252,4 +322,13 @@ export function processOcrTableOutput(cleanedText, rawOcrData = null) {
 
 function isCjk(char) {
   return /[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char);
+}
+
+export function isTimelineRow(row) {
+  if (!Array.isArray(row)) return false;
+  const rowText = row.map((c) => c.text || "").join(" ");
+  const months = (rowText.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/gi) || []).length;
+  const cjkMonths = (rowText.match(/\b([1-9]|1[0-2])\s*月/g) || []).length;
+  const quarters = (rowText.match(/\bQ[1-4]\b/gi) || []).length;
+  return months >= 3 || cjkMonths >= 3 || quarters >= 3;
 }

@@ -3637,6 +3637,9 @@
     const canvasEl = container?.querySelector(".viewer-canvas");
     if (!canvasEl) return;
     container.classList.add("lmss-crop-active");
+    const overlay = document.createElement("div");
+    overlay.className = "lmss-crop-overlay";
+    container.appendChild(overlay);
     const hintBanner = document.createElement("div");
     hintBanner.className = "lmss-crop-hint";
     hintBanner.innerHTML = `
@@ -3648,12 +3651,12 @@
     const box = document.createElement("div");
     box.className = "lmss-crop-box";
     box.style.display = "none";
-    container.appendChild(box);
+    overlay.appendChild(box);
     let isDragging = false;
     let startX = 0;
     let startY = 0;
     let rafId3 = null;
-    const onMouseDown = (e) => {
+    const onDragStart = (e) => {
       if (e.target.closest(".viewer-toolbar, .lmss-crop-hint, .viewer-button")) return;
       e.preventDefault();
       e.stopPropagation();
@@ -3666,9 +3669,10 @@
       box.style.height = "0px";
       box.style.display = "block";
     };
-    const onMouseMove = (e) => {
+    const onDragMove = (e) => {
       if (!isDragging) return;
       e.preventDefault();
+      e.stopPropagation();
       const curX = e.clientX;
       const curY = e.clientY;
       if (rafId3) cancelAnimationFrame(rafId3);
@@ -3683,8 +3687,10 @@
         box.style.height = `${height}px`;
       });
     };
-    const onMouseUp = (e) => {
+    const onDragEnd = (e) => {
       if (!isDragging) return;
+      e.preventDefault();
+      e.stopPropagation();
       isDragging = false;
       if (rafId3) {
         cancelAnimationFrame(rafId3);
@@ -3727,18 +3733,24 @@
       }
       container.classList.remove("lmss-crop-active");
       hintBanner.remove();
-      box.remove();
-      window.removeEventListener("mousemove", onMouseMove, true);
-      window.removeEventListener("mouseup", onMouseUp, true);
-      canvasEl.removeEventListener("mousedown", onMouseDown, true);
+      overlay.remove();
+      window.removeEventListener("pointermove", onDragMove, true);
+      window.removeEventListener("pointerup", onDragEnd, true);
+      window.removeEventListener("mousemove", onDragMove, true);
+      window.removeEventListener("mouseup", onDragEnd, true);
+      overlay.removeEventListener("pointerdown", onDragStart, true);
+      overlay.removeEventListener("mousedown", onDragStart, true);
       window.removeEventListener("keydown", onKeyDown, true);
       activeCropCleanup = null;
     };
     activeCropCleanup = cleanup;
     hintBanner.querySelector(".lmss-crop-hint-close").addEventListener("click", cleanup);
-    canvasEl.addEventListener("mousedown", onMouseDown, true);
-    window.addEventListener("mousemove", onMouseMove, true);
-    window.addEventListener("mouseup", onMouseUp, true);
+    overlay.addEventListener("pointerdown", onDragStart, true);
+    overlay.addEventListener("mousedown", onDragStart, true);
+    window.addEventListener("pointermove", onDragMove, true);
+    window.addEventListener("pointerup", onDragEnd, true);
+    window.addEventListener("mousemove", onDragMove, true);
+    window.addEventListener("mouseup", onDragEnd, true);
     window.addEventListener("keydown", onKeyDown, true);
   }
 
@@ -3769,7 +3781,10 @@
       const puncCount = (cleanChars.match(/[\.,‧、ˊ〈〉ˇ<>=”"~_|\-+:;!@#$%^&*`]/g) || []).length;
       if (cleanChars.length >= 6 && puncCount / cleanChars.length >= 0.35) continue;
       const words = line.trim().split(/\s+/);
-      if (words.length > 1 && words.every((w) => {
+      if (words.length > 0 && words.every((w) => {
+        if (words.length === 1 && /^(?:[A-Z0-9]{1,3}|No)$/.test(w)) {
+          return false;
+        }
         const letters = w.replace(/[^a-zA-Z]/g, "");
         return letters.length > 0 && letters.length <= 2 && !/[0-9\u4e00-\u9fa5]/.test(w);
       })) {
@@ -3821,12 +3836,39 @@
   function cleanTableCell(text) {
     if (!text) return "";
     let val = text.trim();
-    val = val.replace(/[|\t\r\n]+/g, " ").trim();
+    val = val.replace(/[\t\r\n]+/g, " ").trim();
     val = val.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
     val = val.replace(/\busS\s*/g, "US$ ");
+    val = val.replace(/\b2[D0O]2[bB6]\/([0-1]\d)\b/g, "2026/$1");
+    val = val.replace(/\b(20[12])[bB]\/([0-1][\dbB])\b/g, (m, y, mo) => y + "6/" + mo.replace(/[bB]/g, "6"));
+    val = val.replace(/\b(20\d\d)[1l|I/]([0-1]\d)\b/g, "$1/$2");
+    val = val.replace(/CumulativeGap\b/g, "Cumulative Gap");
+    val = val.replace(/[»«▾▼]/g, "");
+    val = val.replace(/\bvy\b/gi, "");
+    val = val.replace(/\b(Month|Goal|Actual|Achv\.?|Cumulative\s+Gap)\s+v\b/gi, "$1");
+    val = val.replace(/(\d)[|Il](\d)/g, "$11$2");
+    val = val.replace(/(\d)[|Il],/g, "$11,");
+    val = val.replace(/,[|Il](\d)/g, ",1$1");
+    val = val.replace(/\b[|Il](\d)/g, "1$1");
+    val = val.replace(/(\d)[|Il]\b/g, "$11");
+    val = val.replace(/-\s*[|Il]\s*/g, "-1");
+    val = val.replace(/(\d)[bB](\d)/g, "$16$2");
+    val = val.replace(/(\d)[bB],/g, "$16,");
+    val = val.replace(/,[bB](\d)/g, ",6$1");
+    val = val.replace(/\b[bB](\d)/g, "6$1");
+    val = val.replace(/(\d)[bB]\b/g, "$16");
+    val = val.replace(/(\d)[bB]\./g, "$16.");
+    val = val.replace(/\.([bB])(\d)/g, ".6$2");
+    val = val.replace(/(\d)[bB]%/g, "$16%");
+    val = val.replace(/(\d)[oO](\d)/g, "$10$2");
+    val = val.replace(/,[oO](\d)/g, ",0$1");
+    val = val.replace(/(\d)[oO],/g, "$10,");
+    val = val.replace(/(\d)[oO]%/g, "$10%");
+    val = val.replace(/\|+/g, " ").trim();
+    val = val.replace(/-(\d+)\s+([0-9bBoO]+),/g, "-$1$2,");
     const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
     val = val.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
-    return val;
+    return val.trim();
   }
 
   // src/content/ocr/table-detector.js
@@ -3895,11 +3937,53 @@
     if (rows.length < 2) {
       return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
     }
-    const columnBins = findColumnBins(rows);
-    const multiColRows = rows.filter((r) => r.length >= 2);
-    const isTable = columnBins.length >= 2 && multiColRows.length >= Math.max(2, Math.floor(rows.length * 0.5));
-    if (!isTable) {
+    if (rows.some(isTimelineRow)) {
       return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+    }
+    const columnBins = findColumnBins(rows);
+    if (columnBins.length < 2) {
+      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+    }
+    const colOccupancy = new Array(columnBins.length).fill(0);
+    for (const row of rows) {
+      const presentBins = /* @__PURE__ */ new Set();
+      for (const cell of row) {
+        if (cell.x0 === null) continue;
+        let closestColIdx = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < columnBins.length; i++) {
+          const diff = Math.abs(cell.x0 - columnBins[i].centerX);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestColIdx = i;
+          }
+        }
+        presentBins.add(closestColIdx);
+      }
+      for (const idx of presentBins) {
+        colOccupancy[idx]++;
+      }
+    }
+    const highOccupancyCols = colOccupancy.filter((cnt) => cnt >= Math.max(2, Math.floor(rows.length * 0.55)));
+    if (highOccupancyCols.length < 2) {
+      return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+    }
+    if (columnBins.length === 2) {
+      const row0Text = rows[0].map((c) => c.text).join(" ");
+      const hasHeaderKeyword = /^(?:Month|Date|Time|Item|Name|Title|Type|Category|Price|Cost|Total|Amount|Qty|Quantity|Goal|Actual|Achv|Status|Note|Description|Key|Value|項目|名稱|標題|日期|時間|月份|類別|單價|數量|小計|總計|金額|狀態|備註|範例|建議|命中|順序|資料源)/i.test(row0Text);
+      let col1CountDigits = 0;
+      let col1Total = 0;
+      for (const row of rows) {
+        for (const cell of row) {
+          if (cell.x0 !== null && Math.abs(cell.x0 - columnBins[1].centerX) < Math.abs(cell.x0 - columnBins[0].centerX)) {
+            col1Total++;
+            if (/^[\d,.\s]+$/.test(cell.text.trim())) col1CountDigits++;
+          }
+        }
+      }
+      if (!hasHeaderKeyword && col1Total > 0 && col1CountDigits / col1Total >= 0.7) {
+        return { isTable: false, tsv: "", rowCount: 0, colCount: 0 };
+      }
     }
     const tsvLines = [];
     for (const row of rows) {
@@ -3938,15 +4022,20 @@
       return { isTable: false, tsv: text || "", rowCount: 0, colCount: 0 };
     }
     const rawLines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (rawLines.length < 3) {
+    if (rawLines.length < 2) {
       return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
     }
+    if (rawLines.some((l) => isTimelineRow([{ text: l }]))) {
+      return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+    }
+    const hasTabs = rawLines.filter((l) => l.includes("	")).length >= Math.max(2, Math.floor(rawLines.length * 0.6));
+    const hasPipes = rawLines.filter((l) => (l.match(/\|/g) || []).length >= 2).length >= Math.max(2, Math.floor(rawLines.length * 0.6));
     const parsedRows = [];
     for (const line of rawLines) {
       let tokens = [];
-      if (line.includes("	")) {
+      if (hasTabs && line.includes("	")) {
         tokens = line.split("	");
-      } else if (line.includes("|")) {
+      } else if (hasPipes && line.includes("|")) {
         tokens = line.split("|").map((t) => t.trim()).filter(Boolean);
       } else if (/\s{2,}/.test(line)) {
         tokens = line.split(/\s{2,}/);
@@ -3957,11 +4046,24 @@
       if (tokens.length > 0) parsedRows.push(tokens);
     }
     const multiTokenRows = parsedRows.filter((r) => r.length >= 2);
-    const isTable = multiTokenRows.length >= 3 && multiTokenRows.length >= Math.floor(parsedRows.length * 0.6);
-    if (!isTable) {
+    if (multiTokenRows.length < 2 || multiTokenRows.length < Math.floor(parsedRows.length * 0.6)) {
       return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
     }
     const maxCols = Math.max(...multiTokenRows.map((r) => r.length));
+    if (!hasTabs && !hasPipes) {
+      if (maxCols < 3) {
+        return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+      }
+      const uniformRows = parsedRows.filter((r) => r.length === maxCols);
+      if (uniformRows.length / parsedRows.length < 0.75) {
+        return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+      }
+      const row0Text = parsedRows[0].join(" ");
+      const hasHeaderKeyword = /(?:Month|Date|Time|Item|Name|Title|Type|Category|Price|Cost|Total|Amount|Qty|Quantity|Goal|Actual|Achv|Status|Note|Description|Key|Value|項目|名稱|標題|日期|時間|月份|類別|單價|數量|小計|總計|金額|狀態|備註|範例|建議|命中|順序|資料源)/i.test(row0Text);
+      if (!hasHeaderKeyword) {
+        return { isTable: false, tsv: text, rowCount: 0, colCount: 0 };
+      }
+    }
     const tsvLines = parsedRows.map((r) => {
       const cleanedTokens = r.map((t) => cleanTableCell(t));
       return cleanedTokens.join("	");
@@ -4003,6 +4105,14 @@
   }
   function isCjk(char) {
     return /[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char);
+  }
+  function isTimelineRow(row) {
+    if (!Array.isArray(row)) return false;
+    const rowText = row.map((c) => c.text || "").join(" ");
+    const months = (rowText.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/gi) || []).length;
+    const cjkMonths = (rowText.match(/\b([1-9]|1[0-2])\s*月/g) || []).length;
+    const quarters = (rowText.match(/\bQ[1-4]\b/gi) || []).length;
+    return months >= 3 || cjkMonths >= 3 || quarters >= 3;
   }
 
   // src/content/shared/download-manager.js
@@ -4713,12 +4823,12 @@
       toolbar: {
         zoomIn: 1,
         zoomOut: 1,
-        oneToOne: 1,
+        oneToOne: 0,
         reset: 1,
-        prev: validUrls.length > 1 ? 1 : 0,
-        next: validUrls.length > 1 ? 1 : 0,
+        prev: 0,
+        next: 0,
         rotateLeft: 1,
-        rotateRight: 1,
+        rotateRight: 0,
         cropOcr: {
           show: 1,
           size: "large",

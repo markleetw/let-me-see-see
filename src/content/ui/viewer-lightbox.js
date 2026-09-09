@@ -127,12 +127,12 @@ export function openViewerLightbox(urls, initialIndex = 0, ViewerClass) {
     toolbar: {
       zoomIn: 1,
       zoomOut: 1,
-      oneToOne: 1,
+      oneToOne: 0,
       reset: 1,
-      prev: validUrls.length > 1 ? 1 : 0,
-      next: validUrls.length > 1 ? 1 : 0,
+      prev: 0,
+      next: 0,
       rotateLeft: 1,
-      rotateRight: 1,
+      rotateRight: 0,
       cropOcr: {
         show: 1,
         size: "large",

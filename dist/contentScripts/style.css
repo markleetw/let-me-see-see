@@ -90,7 +90,27 @@
 }
 
 /* Lightbox Crop Mode Overlay */
-.viewer-container.lmss-crop-active .viewer-canvas {
+.viewer-container.lmss-crop-active,
+.viewer-container.lmss-crop-active .viewer-canvas,
+.viewer-container.lmss-crop-active .viewer-canvas img {
+  cursor: crosshair !important;
+}
+
+.lmss-crop-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2020;
+  cursor: crosshair !important;
+  touch-action: none;
+  user-select: none;
+}
+
+.lmss-crop-overlay * {
   cursor: crosshair !important;
 }
 

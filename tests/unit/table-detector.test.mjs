@@ -268,5 +268,183 @@ test("Unit: Table Structure Detection & TSV Formatting", async (t) => {
     assert.strictEqual(result.colCount, numCols);
     assert.ok(elapsed < 100, `Processing 10,000 cells took ${elapsed.toFixed(2)}ms (must be < 100ms)`);
   });
+
+  await t.test("Exclusion: Roadmap / Timeline chart must NOT be classified as table", () => {
+    // media_1788935217815.png
+    const roadmapLines = [
+      {
+        text: "Gift Finder v2 System Noti Optimization Stage 2 Search Result Optimization",
+        words: [
+          { text: "Gift Finder v2", bbox: { x0: 20, x1: 150 } },
+          { text: "System Noti Optimization Stage 2", bbox: { x0: 450, x1: 700 } },
+          { text: "Search Result Optimization", bbox: { x0: 720, x1: 950 } }
+        ]
+      },
+      {
+        text: "System Noti Optimization Stage 1 Product Page Revamp Gift Finder v3",
+        words: [
+          { text: "System Noti Optimization Stage 1", bbox: { x0: 20, x1: 250 } },
+          { text: "Product Page Revamp", bbox: { x0: 300, x1: 520 } },
+          { text: "Gift Finder v3", bbox: { x0: 580, x1: 750 } }
+        ]
+      },
+      {
+        text: "sep oct nov dec jan feb mar",
+        words: [
+          { text: "sep", bbox: { x0: 50, x1: 80 } },
+          { text: "oct", bbox: { x0: 180, x1: 210 } },
+          { text: "nov", bbox: { x0: 320, x1: 350 } },
+          { text: "dec", bbox: { x0: 460, x1: 490 } },
+          { text: "jan", bbox: { x0: 600, x1: 630 } },
+          { text: "feb", bbox: { x0: 740, x1: 770 } },
+          { text: "mar", bbox: { x0: 880, x1: 910 } }
+        ]
+      },
+      {
+        text: "DWEB Browse Page Revamp DWEB Homepage Revamp",
+        words: [
+          { text: "DWEB Browse Page Revamp", bbox: { x0: 20, x1: 220 } },
+          { text: "DWEB Homepage Revamp", bbox: { x0: 300, x1: 500 } }
+        ]
+      }
+    ];
+
+    const result = detectTableFromTesseractResult(roadmapLines);
+    assert.strictEqual(result.isTable, false, "Roadmap with timeline axis must NOT be a table");
+  });
+
+  await t.test("Exclusion: Gantt chart with CJK timeline months must NOT be classified as table", () => {
+    // media_1788935377197.png
+    const ganttLines = [
+      {
+        text: "7月 8月 9月 10月 11月 12月 1月",
+        words: [
+          { text: "7月", bbox: { x0: 50, x1: 80 } },
+          { text: "8月", bbox: { x0: 180, x1: 210 } },
+          { text: "9月", bbox: { x0: 320, x1: 350 } },
+          { text: "10月", bbox: { x0: 460, x1: 500 } },
+          { text: "11月", bbox: { x0: 600, x1: 640 } },
+          { text: "12月", bbox: { x0: 740, x1: 780 } },
+          { text: "1月", bbox: { x0: 880, x1: 910 } }
+        ]
+      },
+      {
+        text: "iichi Project",
+        words: [{ text: "iichi Project", bbox: { x0: 20, x1: 280 } }]
+      },
+      {
+        text: "分潤廣告",
+        words: [{ text: "分潤廣告", bbox: { x0: 80, x1: 420 } }]
+      },
+      {
+        text: "Offline Event Registration",
+        words: [{ text: "Offline Event Registration", bbox: { x0: 150, x1: 550 } }]
+      }
+    ];
+
+    const result = detectTableFromTesseractResult(ganttLines);
+    assert.strictEqual(result.isTable, false, "Gantt chart with timeline axis must NOT be a table");
+  });
+
+  await t.test("Exclusion: Search suggestion dropdown list must NOT be classified as table", () => {
+    // media_1788935245055.png
+    const dropdownLines = [
+      {
+        text: "雨靴 316",
+        words: [
+          { text: "雨靴", bbox: { x0: 40, x1: 90 } },
+          { text: "316", bbox: { x0: 280, x1: 320 } }
+        ]
+      },
+      {
+        text: "雨衣 2,018",
+        words: [
+          { text: "雨衣", bbox: { x0: 40, x1: 90 } },
+          { text: "2,018", bbox: { x0: 280, x1: 330 } }
+        ]
+      },
+      {
+        text: "雨鞋 313",
+        words: [
+          { text: "雨鞋", bbox: { x0: 40, x1: 90 } },
+          { text: "313", bbox: { x0: 280, x1: 320 } }
+        ]
+      },
+      {
+        text: "雨之情/雨之戀",
+        words: [{ text: "雨之情/雨之戀", bbox: { x0: 40, x1: 180 } }]
+      },
+      {
+        text: "雨傘 2,222",
+        words: [
+          { text: "雨傘", bbox: { x0: 40, x1: 90 } },
+          { text: "2,222", bbox: { x0: 280, x1: 330 } }
+        ]
+      },
+      {
+        text: "雨中圓舞曲",
+        words: [{ text: "雨中圓舞曲", bbox: { x0: 40, x1: 160 } }]
+      }
+    ];
+
+    const result = detectTableFromTesseractResult(dropdownLines);
+    assert.strictEqual(result.isTable, false, "Search suggestion list without headers must NOT be a table");
+  });
+
+  await t.test("Inclusion: Onsite RMN financial report must be accurately classified as table", () => {
+    // media_1788935345101.png
+    const rmnLines = [
+      {
+        text: "Month Goal (USD) Act. / Est. (USD) % Achv. Cumulative Gap (USD)",
+        words: [
+          { text: "Month", bbox: { x0: 50, x1: 110 } },
+          { text: "Goal (USD)", bbox: { x0: 200, x1: 300 } },
+          { text: "Act. / Est. (USD)", bbox: { x0: 400, x1: 550 } },
+          { text: "% Achv.", bbox: { x0: 650, x1: 720 } },
+          { text: "Cumulative Gap (USD)", bbox: { x0: 800, x1: 980 } }
+        ]
+      },
+      {
+        text: "2026/04 US$ 81,379 US$ 65,345 80.30% -16,034",
+        words: [
+          { text: "2026/04", bbox: { x0: 50, x1: 120 } },
+          { text: "US$ 81,379", bbox: { x0: 200, x1: 310 } },
+          { text: "US$ 65,345", bbox: { x0: 400, x1: 510 } },
+          { text: "80.30%", bbox: { x0: 650, x1: 710 } },
+          { text: "-16,034", bbox: { x0: 850, x1: 930 } }
+        ]
+      },
+      {
+        text: "2026/05 US$ 90,977 US$ 71,171 78.23% -35,841",
+        words: [
+          { text: "2026/05", bbox: { x0: 50, x1: 120 } },
+          { text: "US$ 90,977", bbox: { x0: 200, x1: 310 } },
+          { text: "US$ 71,171", bbox: { x0: 400, x1: 510 } },
+          { text: "78.23%", bbox: { x0: 650, x1: 710 } },
+          { text: "-35,841", bbox: { x0: 850, x1: 930 } }
+        ]
+      },
+      {
+        text: "2026/06 US$ 90,409 US$ 68,924 76.24% -57,326",
+        words: [
+          { text: "2026/06", bbox: { x0: 50, x1: 120 } },
+          { text: "US$ 90,409", bbox: { x0: 200, x1: 310 } },
+          { text: "US$ 68,924", bbox: { x0: 400, x1: 510 } },
+          { text: "76.24%", bbox: { x0: 650, x1: 710 } },
+          { text: "-57,326", bbox: { x0: 850, x1: 930 } }
+        ]
+      }
+    ];
+
+    const result = detectTableFromTesseractResult(rmnLines);
+    assert.strictEqual(result.isTable, true, "Onsite RMN must be classified as a table");
+    assert.strictEqual(result.colCount, 5);
+    assert.strictEqual(result.rowCount, 4);
+
+    const rows = result.tsv.split("\n");
+    assert.strictEqual(rows[0].split("\t").length, 5);
+    assert.strictEqual(rows[1].split("\t").length, 5);
+  });
 });
+
 

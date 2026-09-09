@@ -56,7 +56,10 @@
         const validWords = line.words.filter((w) => {
           if (typeof w.confidence !== "number") return true;
           const txt = (w.text || "").trim();
-          return txt.length <= 1 ? w.confidence >= 50 : w.confidence >= (hasValidTokens ? 35 : 45);
+          const wordHasCjk = /[\u4e00-\u9fa5]/.test(txt);
+          if (wordHasCjk) return w.confidence >= 35;
+          if (txt.length <= 1) return w.confidence >= 50;
+          return w.confidence >= (hasValidTokens ? 35 : 45);
         });
         if (validWords.length === 0) continue;
         let lineStr = "";
@@ -147,15 +150,22 @@
           if (!text && res?.data?.text) {
             text = res.data.text;
           }
-          const structuredLines = (res?.data?.lines || []).map((l) => ({
+          const structuredLines = (res?.data?.lines || []).filter((l) => {
+            if (typeof l.confidence === "number" && l.confidence < 25) return false;
+            return true;
+          }).map((l) => ({
             text: l.text,
             bbox: l.bbox ? { x0: l.bbox.x0, y0: l.bbox.y0, x1: l.bbox.x1, y1: l.bbox.y1 } : null,
-            words: (l.words || []).map((w) => ({
+            words: (l.words || []).filter((w) => {
+              if (typeof w.confidence === "number" && w.confidence < 25) return false;
+              const t = (w.text || "").trim();
+              return t && !/^[\s._\-|\/\\]+$/.test(t);
+            }).map((w) => ({
               text: w.text,
               confidence: w.confidence,
               bbox: w.bbox ? { x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 } : null
             }))
-          }));
+          })).filter((l) => l.words.length > 0);
           sendResponse({ success: true, text, ocrData: { lines: structuredLines } });
         } catch (err) {
           console.error("[Offscreen OCR Error]", err);

@@ -13,7 +13,7 @@ import { uiToast } from "./toast.js";
  * @param {{left: number, top: number, width: number, height: number}} imgRect Rendered image client rect
  * @param {number} naturalWidth Original image width in pixels
  * @param {number} naturalHeight Original image height in pixels
- * @param {number} [buffer=8] Safety padding buffer in native pixels
+ * @param {number} [buffer=18] Safety padding buffer in native pixels
  * @returns {{cropX: number, cropY: number, cropW: number, cropH: number}}
  */
 export function calculateImageCropBounds(
@@ -21,7 +21,7 @@ export function calculateImageCropBounds(
   imgRect,
   naturalWidth,
   naturalHeight,
-  buffer = 8
+  buffer = 18
 ) {
   if (
     !screenBox ||
@@ -118,6 +118,8 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
   if (!canvasEl) return;
 
   container.classList.add("lmss-crop-active");
+  const cropBtn = container.querySelector(".viewer-crop-ocr-btn, [data-viewer-action='cropOcr']");
+  if (cropBtn) cropBtn.classList.add("is-active");
 
   // Create crop overlay covering the entire viewport to intercept all pointer events
   const overlay = document.createElement("div");
@@ -215,7 +217,7 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
     const naturalWidth = viewerInstance.imageData?.naturalWidth || img.naturalWidth || imgRect.width;
     const naturalHeight = viewerInstance.imageData?.naturalHeight || img.naturalHeight || imgRect.height;
 
-    const cropBounds = calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, 8);
+    const cropBounds = calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, 18);
     const cropDataUrl = cropImageToDataUrl(img, cropBounds);
 
     cleanup();
@@ -239,6 +241,7 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
       rafId = null;
     }
     container.classList.remove("lmss-crop-active");
+    if (cropBtn) cropBtn.classList.remove("is-active");
     hintBanner.remove();
     overlay.remove();
     window.removeEventListener("pointermove", onDragMove, true);

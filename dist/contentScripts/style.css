@@ -73,16 +73,13 @@
   display: none !important;
 }
 
-/* Crop OCR Button Highlight */
-.viewer-toolbar > ul > li.viewer-crop-ocr-btn,
-.viewer-toolbar > ul > li[data-viewer-action="cropOcr"] {
-  background-color: rgba(16, 185, 129, 0.2) !important;
-  color: #10b981 !important;
-  border: 1px solid rgba(16, 185, 129, 0.45) !important;
-}
-
+/* Crop OCR Button: Normal state matches other buttons; highlighted on hover or active crop mode */
 .viewer-toolbar > ul > li.viewer-crop-ocr-btn:hover,
-.viewer-toolbar > ul > li[data-viewer-action="cropOcr"]:hover {
+.viewer-toolbar > ul > li[data-viewer-action="cropOcr"]:hover,
+.viewer-container.lmss-crop-active .viewer-toolbar > ul > li.viewer-crop-ocr-btn,
+.viewer-container.lmss-crop-active .viewer-toolbar > ul > li[data-viewer-action="cropOcr"],
+.viewer-toolbar > ul > li.viewer-crop-ocr-btn.is-active,
+.viewer-toolbar > ul > li[data-viewer-action="cropOcr"].is-active {
   background-color: #10b981 !important;
   color: #ffffff !important;
   border-color: #10b981 !important;

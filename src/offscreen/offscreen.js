@@ -5,18 +5,21 @@
 import { getTesseractWorker } from "./tesseract-client.js";
 import { extractLinesFromResult } from "./line-extractor.js";
 import { copyToOffscreenClipboard } from "./clipboard-fallback.js";
+import { enhanceImageForOcr } from "./image-enhancer.js";
 
 // Export for tests and global execution
 if (typeof globalThis !== "undefined") {
   globalThis.extractLinesFromResult = extractLinesFromResult;
   globalThis.copyToOffscreenClipboard = copyToOffscreenClipboard;
   globalThis.getTesseractWorker = getTesseractWorker;
+  globalThis.enhanceImageForOcr = enhanceImageForOcr;
 }
 if (typeof window !== "undefined") {
   window.__letMeSeeSeeOffscreen = {
     extractLinesFromResult,
     copyToOffscreenClipboard,
-    getTesseractWorker
+    getTesseractWorker,
+    enhanceImageForOcr
   };
 }
 
@@ -45,7 +48,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const worker = await getTesseractWorker();
-        const res = await worker.recognize(message.image);
+        const enhancedImg = await enhanceImageForOcr(message.image);
+        const res = await worker.recognize(enhancedImg);
         const lines = extractLinesFromResult(res);
         let text = lines.join("\n");
         if (!text && res?.data?.text) {

@@ -1,0 +1,132 @@
+import test from "node:test";
+import assert from "node:assert";
+import { enhanceImageForOcr } from "../../src/offscreen/image-enhancer.js";
+
+test("Unit: Image Enhancer for Offline OCR", async (t) => {
+  await t.test("Passthrough: handles empty or invalid inputs gracefully", async () => {
+    assert.strictEqual(await enhanceImageForOcr(null), null);
+    assert.strictEqual(await enhanceImageForOcr(""), "");
+    assert.strictEqual(await enhanceImageForOcr(undefined), undefined);
+  });
+
+  await t.test("Polarity detection: inverts white-on-dark image and preserves light document", async () => {
+    // Setup minimal mock DOM
+    const origDoc = globalThis.document;
+    const origImg = globalThis.Image;
+
+    try {
+      let drawnScale = 1;
+      let invertedPixels = false;
+
+      // Mock canvas
+      const mockCanvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          drawImage: (img, x, y, w, h) => {
+            drawnScale = w / img.width;
+          },
+          getImageData: (x, y, w, h) => {
+            const data = new Uint8ClampedArray(w * h * 4);
+            // Simulate dark background (luma ~30) with white text
+            for (let i = 0; i < data.length; i += 4) {
+              data[i] = 30;     // R
+              data[i + 1] = 30; // G
+              data[i + 2] = 30; // B
+              data[i + 3] = 255;
+            }
+            return { data };
+          },
+          putImageData: (imgData) => {
+            // Check if pixels were inverted (30 -> 225)
+            if (imgData.data[0] > 200) {
+              invertedPixels = true;
+            }
+          }
+        }),
+        toDataURL: () => "data:image/png;base64,mockEnhanced"
+      };
+
+      globalThis.document = {
+        createElement: (tag) => {
+          if (tag === "canvas") return mockCanvas;
+          return {};
+        }
+      };
+
+      globalThis.Image = class {
+        constructor() {
+          this.width = 300;
+          this.height = 100;
+          setTimeout(() => {
+            if (typeof this.onload === "function") this.onload();
+          }, 0);
+        }
+      };
+
+      const result = await enhanceImageForOcr("data:image/png;base64,mockDark");
+      assert.strictEqual(result, "data:image/png;base64,mockEnhanced");
+      assert.strictEqual(drawnScale, 2, "Small image (300x100) must be upscaled 2x");
+      assert.strictEqual(invertedPixels, true, "Dark background must be inverted to light background");
+    } finally {
+      globalThis.document = origDoc;
+      globalThis.Image = origImg;
+    }
+  });
+
+  await t.test("White Document Protection: white background document is NOT inverted", async () => {
+    const origDoc = globalThis.document;
+    const origImg = globalThis.Image;
+
+    try {
+      let invertedPixels = false;
+
+      const mockCanvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          drawImage: () => {},
+          getImageData: (x, y, w, h) => {
+            const data = new Uint8ClampedArray(w * h * 4);
+            // Simulate white background (luma = 255)
+            for (let i = 0; i < data.length; i += 4) {
+              data[i] = 255;
+              data[i + 1] = 255;
+              data[i + 2] = 255;
+              data[i + 3] = 255;
+            }
+            return { data };
+          },
+          putImageData: (imgData) => {
+            // If inverted, 255 -> 0
+            if (imgData.data[0] < 50) {
+              invertedPixels = true;
+            }
+          }
+        }),
+        toDataURL: () => "data:image/png;base64,mockWhiteDoc"
+      };
+
+      globalThis.document = {
+        createElement: (tag) => (tag === "canvas" ? mockCanvas : {})
+      };
+
+      globalThis.Image = class {
+        constructor() {
+          this.width = 1024;
+          this.height = 768;
+          setTimeout(() => {
+            if (typeof this.onload === "function") this.onload();
+          }, 0);
+        }
+      };
+
+      const result = await enhanceImageForOcr("data:image/png;base64,mockDoc");
+      assert.strictEqual(result, "data:image/png;base64,mockWhiteDoc");
+      assert.strictEqual(invertedPixels, false, "White background document must NEVER be inverted");
+    } finally {
+      globalThis.document = origDoc;
+      globalThis.Image = origImg;
+    }
+  });
+});

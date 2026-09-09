@@ -26,7 +26,7 @@ const TOOLBAR_SVG_ICONS = {
   },
   "reset": {
     title: "重設 (Reset)",
-    svg: `<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>`
+    svg: `<svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path><rect x="9" y="9" width="6" height="6" rx="1"></rect></svg>`
   },
   "prev": {
     title: "上一張 (Previous)",
@@ -38,7 +38,7 @@ const TOOLBAR_SVG_ICONS = {
   },
   "rotate-left": {
     title: "向左旋轉 (Rotate Left)",
-    svg: `<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 1 2.64 6.36"></path><polyline points="3 22 3 12 13 12"></polyline></svg>`
+    svg: `<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>`
   },
   "rotate-right": {
     title: "向右旋轉 (Rotate Right)",

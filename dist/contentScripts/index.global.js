@@ -3577,7 +3577,7 @@
   }
 
   // src/content/ui/lightbox-crop.js
-  function calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, buffer = 8) {
+  function calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, buffer = 18) {
     if (!screenBox || !imgRect || !imgRect.width || !imgRect.height || naturalWidth <= 0 || naturalHeight <= 0) {
       return { cropX: 0, cropY: 0, cropW: 0, cropH: 0 };
     }
@@ -3637,6 +3637,8 @@
     const canvasEl = container?.querySelector(".viewer-canvas");
     if (!canvasEl) return;
     container.classList.add("lmss-crop-active");
+    const cropBtn = container.querySelector(".viewer-crop-ocr-btn, [data-viewer-action='cropOcr']");
+    if (cropBtn) cropBtn.classList.add("is-active");
     const overlay = document.createElement("div");
     overlay.className = "lmss-crop-overlay";
     container.appendChild(overlay);
@@ -3712,7 +3714,7 @@
       const imgRect = img.getBoundingClientRect();
       const naturalWidth = viewerInstance2.imageData?.naturalWidth || img.naturalWidth || imgRect.width;
       const naturalHeight = viewerInstance2.imageData?.naturalHeight || img.naturalHeight || imgRect.height;
-      const cropBounds = calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, 8);
+      const cropBounds = calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, 18);
       const cropDataUrl = cropImageToDataUrl(img, cropBounds);
       cleanup();
       if (cropDataUrl && typeof onCropSelected === "function") {
@@ -3732,6 +3734,7 @@
         rafId3 = null;
       }
       container.classList.remove("lmss-crop-active");
+      if (cropBtn) cropBtn.classList.remove("is-active");
       hintBanner.remove();
       overlay.remove();
       window.removeEventListener("pointermove", onDragMove, true);
@@ -3793,6 +3796,7 @@
       line = line.replace(/(?:^|\s+)(?:Ww|沁)\s+(?=[A-Z\u4e00-\u9fa5])/g, " ");
       const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
       line = line.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
+      line = disambiguateCjkCharacters(line);
       line = line.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
       line = line.replace(/\busS\s*/g, "US$ ");
       line = line.replace(/\b2[D0O]2[bB6]\/([0-1]\d)\b/g, "2026/$1");
@@ -3868,7 +3872,20 @@
     val = val.replace(/-(\d+)\s+([0-9bBoO]+),/g, "-$1$2,");
     const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
     val = val.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
+    val = disambiguateCjkCharacters(val);
     return val.trim();
+  }
+  function disambiguateCjkCharacters(text) {
+    if (!text) return "";
+    let val = text;
+    val = val.replace(/雨用/g, "\u5169\u7528");
+    val = val.replace(/雨([種者個款件組套面色岸難倍側旁端邊隻條位次張把台瓶盒度])/g, "\u5169$1");
+    val = val.replace(/兩([衣傘靴])/g, "\u96E8$1");
+    val = val.replace(/兩具/g, "\u96E8\u5177");
+    val = val.replace(/兩中([圓漫步曲景情風])/g, "\u96E8\u4E2D$1");
+    val = val.replace(/([防避淋梅暴陣雷下落細微大晴])兩/g, "$1\u96E8");
+    val = val.replace(/兩([滴勢季量水停])/g, "\u96E8$1");
+    return val;
   }
 
   // src/content/ocr/table-detector.js
@@ -4733,7 +4750,7 @@
     },
     "reset": {
       title: "\u91CD\u8A2D (Reset)",
-      svg: `<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>`
+      svg: `<svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path><rect x="9" y="9" width="6" height="6" rx="1"></rect></svg>`
     },
     "prev": {
       title: "\u4E0A\u4E00\u5F35 (Previous)",
@@ -4745,7 +4762,7 @@
     },
     "rotate-left": {
       title: "\u5411\u5DE6\u65CB\u8F49 (Rotate Left)",
-      svg: `<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 1 2.64 6.36"></path><polyline points="3 22 3 12 13 12"></polyline></svg>`
+      svg: `<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>`
     },
     "rotate-right": {
       title: "\u5411\u53F3\u65CB\u8F49 (Rotate Right)",

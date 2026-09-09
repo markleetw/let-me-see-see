@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
-import { cleanOcrText } from "../../src/content/ocr/text-cleaner.js";
+import { cleanOcrText, disambiguateCjkCharacters } from "../../src/content/ocr/text-cleaner.js";
 
 test("Unit: OCR Text Cleaner & ReDoS Guard", async (t) => {
   await t.test("CJK spacing removal: eliminates internal spaces between Chinese characters", () => {
@@ -40,6 +40,20 @@ test("Unit: OCR Text Cleaner & ReDoS Guard", async (t) => {
     assert.ok(cleaned.includes("Cumulative Gap"), "Must normalize CumulativeGap to Cumulative Gap");
     assert.ok(!cleaned.includes("»"), "Must remove chevron");
     assert.ok(!cleaned.includes("vy"), "Must remove stray vy artifact");
+  });
+
+  await t.test("CJK Disambiguation: corrects 雨 vs 兩 based on linguistic context", () => {
+    assert.strictEqual(disambiguateCjkCharacters("雨用托特包 ▸"), "兩用托特包 ▸");
+    assert.strictEqual(disambiguateCjkCharacters("雨用後背包"), "兩用後背包");
+    assert.strictEqual(disambiguateCjkCharacters("共有雨款顏色"), "共有兩款顏色");
+    assert.strictEqual(disambiguateCjkCharacters("晴雨兩用"), "晴雨兩用");
+    assert.strictEqual(disambiguateCjkCharacters("「兩中圓舞曲」"), "「雨中圓舞曲」");
+    assert.strictEqual(disambiguateCjkCharacters("會呼吸的兩衣"), "會呼吸的雨衣");
+    assert.strictEqual(disambiguateCjkCharacters("質感兩具"), "質感雨具");
+    assert.strictEqual(disambiguateCjkCharacters("兩具, 兩衣, 兩傘, 兩靴, 防水鞋"), "雨具, 雨衣, 雨傘, 雨靴, 防水鞋");
+    assert.strictEqual(disambiguateCjkCharacters("防兩外套"), "防雨外套");
+    assert.strictEqual(disambiguateCjkCharacters("梅兩季節"), "梅雨季節");
+    assert.strictEqual(disambiguateCjkCharacters("兩勢漸增"), "雨勢漸增");
   });
 
   await t.test("Performance & ReDoS Guard: 50,000 characters process in under 200ms (ReDoS free)", () => {

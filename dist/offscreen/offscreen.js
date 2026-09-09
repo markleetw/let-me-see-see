@@ -112,17 +112,112 @@
     }
   }
 
+  // src/offscreen/image-enhancer.js
+  async function enhanceImageForOcr(imageSource) {
+    if (!imageSource || typeof document === "undefined" || typeof Image === "undefined") {
+      return imageSource;
+    }
+    try {
+      const img = await loadImageElement(imageSource);
+      if (!img || !img.width || !img.height) return imageSource;
+      const origW = img.naturalWidth || img.width;
+      const origH = img.naturalHeight || img.height;
+      let scale = 1;
+      if (origH < 500 || origW < 800) {
+        scale = 2;
+      }
+      if (origW * scale > 1800 || origH * scale > 1800) {
+        scale = 1;
+      }
+      const targetW = Math.round(origW * scale);
+      const targetH = Math.round(origH * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return imageSource;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      const imgData = ctx.getImageData(0, 0, targetW, targetH);
+      const data = imgData.data;
+      const totalPixels = targetW * targetH;
+      let borderLumaSum = 0;
+      let borderCount = 0;
+      const borderThickness = Math.max(1, Math.min(8, Math.floor(Math.min(targetW, targetH) * 0.05)));
+      for (let y = 0; y < targetH; y++) {
+        for (let x = 0; x < targetW; x++) {
+          if (y < borderThickness || y >= targetH - borderThickness || x < borderThickness || x >= targetW - borderThickness) {
+            const idx = (y * targetW + x) * 4;
+            const luma = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+            borderLumaSum += luma;
+            borderCount++;
+          }
+        }
+      }
+      const avgBorderLuma = borderCount > 0 ? borderLumaSum / borderCount : 128;
+      let overallLumaSum = 0;
+      let brightPixelCount = 0;
+      const step = Math.max(1, Math.floor(totalPixels / 5e3));
+      let sampledCount = 0;
+      for (let i = 0; i < totalPixels; i += step) {
+        const idx = i * 4;
+        const luma = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        overallLumaSum += luma;
+        if (luma > 180) brightPixelCount++;
+        sampledCount++;
+      }
+      const avgOverallLuma = sampledCount > 0 ? overallLumaSum / sampledCount : 128;
+      const brightRatio = sampledCount > 0 ? brightPixelCount / sampledCount : 0;
+      const isDarkBackground = avgBorderLuma < 130 || avgOverallLuma < 115 && brightRatio > 0.05;
+      if (isDarkBackground) {
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = 255 - data[i];
+          data[i + 1] = 255 - data[i + 1];
+          data[i + 2] = 255 - data[i + 2];
+        }
+      }
+      if (isDarkBackground || avgBorderLuma < 200) {
+        const contrastFactor = 1.15;
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = Math.min(255, Math.max(0, Math.round((data[i] - 128) * contrastFactor + 128)));
+          data[i + 1] = Math.min(255, Math.max(0, Math.round((data[i + 1] - 128) * contrastFactor + 128)));
+          data[i + 2] = Math.min(255, Math.max(0, Math.round((data[i + 2] - 128) * contrastFactor + 128)));
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+      const enhancedDataUrl = canvas.toDataURL("image/png");
+      canvas.width = 0;
+      canvas.height = 0;
+      return enhancedDataUrl;
+    } catch (err) {
+      console.warn("[Let Me See See] Image enhancement error:", err);
+      return imageSource;
+    }
+  }
+  function loadImageElement(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = (err) => reject(err);
+      img.src = src;
+    });
+  }
+
   // src/offscreen/offscreen.js
   if (typeof globalThis !== "undefined") {
     globalThis.extractLinesFromResult = extractLinesFromResult;
     globalThis.copyToOffscreenClipboard = copyToOffscreenClipboard;
     globalThis.getTesseractWorker = getTesseractWorker;
+    globalThis.enhanceImageForOcr = enhanceImageForOcr;
   }
   if (typeof window !== "undefined") {
     window.__letMeSeeSeeOffscreen = {
       extractLinesFromResult,
       copyToOffscreenClipboard,
-      getTesseractWorker
+      getTesseractWorker,
+      enhanceImageForOcr
     };
   }
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -144,7 +239,8 @@
       (async () => {
         try {
           const worker = await getTesseractWorker();
-          const res = await worker.recognize(message.image);
+          const enhancedImg = await enhanceImageForOcr(message.image);
+          const res = await worker.recognize(enhancedImg);
           const lines = extractLinesFromResult(res);
           let text = lines.join("\n");
           if (!text && res?.data?.text) {

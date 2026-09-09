@@ -58,6 +58,9 @@ export function cleanOcrText(text) {
     const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
     line = line.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
 
+    // Contextual CJK disambiguation (e.g. 雨 vs 兩)
+    line = disambiguateCjkCharacters(line);
+
     // Normalize Currency: usS, USS, us$, etc. -> US$
     line = line.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
     line = line.replace(/\busS\s*/g, "US$ ");
@@ -174,5 +177,35 @@ export function cleanTableCell(text) {
 
   const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
   val = val.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
+  val = disambiguateCjkCharacters(val);
   return val.trim();
+}
+
+/**
+ * Disambiguate visually similar CJK characters based on high-frequency linguistic context.
+ * Resolves frequent Tesseract confusion between '雨' (rain) and '兩' (two/dual/both).
+ */
+export function disambiguateCjkCharacters(text) {
+  if (!text) return "";
+  let val = text;
+
+  // 1. Fix '雨' falsely recognized where '兩' is the intended character:
+  // e.g. "雨用" -> "兩用" (兩用托特包, 兩用後背包, 兩用手提包, 兩用包, 晴雨兩用)
+  val = val.replace(/雨用/g, "兩用");
+  // e.g. "兩種", "兩者", "兩個", "兩款", "兩件", "兩組", "兩套", "兩面", "兩色", "兩岸", "兩難", "兩倍", "兩側", "兩旁", "兩端", "兩邊", "兩隻", "兩條", "兩位", "兩次", "兩張", "兩把", "兩台", "兩瓶", "兩盒", "兩度"
+  val = val.replace(/雨([種者個款件組套面色岸難倍側旁端邊隻條位次張把台瓶盒度])/g, "兩$1");
+
+  // 2. Fix '兩' falsely recognized where '雨' is the intended character:
+  // e.g. "兩衣" -> "雨衣", "兩傘" -> "雨傘", "兩靴" -> "雨靴"
+  val = val.replace(/兩([衣傘靴])/g, "雨$1");
+  // e.g. "兩具" -> "雨具" (質感雨具, 防雨/雨具, 雨具, 雨衣)
+  val = val.replace(/兩具/g, "雨具");
+  // e.g. "兩中圓舞曲", "兩中漫步" -> "雨中圓舞曲", "雨中漫步"
+  val = val.replace(/兩中([圓漫步曲景情風])/g, "雨中$1");
+  // e.g. "防兩" -> "防雨", "避兩" -> "避雨", "淋兩" -> "淋雨", "梅兩" -> "梅雨", "暴兩" -> "暴雨", "陣兩" -> "陣雨", "雷兩" -> "雷雨", "下兩" -> "下雨", "落兩" -> "落雨", "細兩" -> "細雨", "微兩" -> "微雨", "大兩" -> "大雨", "晴兩" -> "晴雨"
+  val = val.replace(/([防避淋梅暴陣雷下落細微大晴])兩/g, "$1雨");
+  // e.g. "兩滴", "兩勢", "兩季", "兩量", "兩水", "兩停"
+  val = val.replace(/兩([滴勢季量水停])/g, "雨$1");
+
+  return val;
 }

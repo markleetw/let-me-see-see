@@ -64,6 +64,8 @@ This document provides system design, architectural invariants, communication pr
 - Clamped dimension: Scale down images exceeding 1600px before feeding to OCR to prevent WASM Out-of-Memory.
 - **Maintain 1:1 Native Resolution**: Never apply fractional bilinear upscaling (e.g. 1.5625x) to screenshots; it blurs fine 1px strokes of Traditional Chinese characters.
 - **Never Invert the Whole Image**: Inverting a white-background document makes 90% of the canvas pitch-black (`#000000`), completely breaking Leptonica's Otsu binarization and PSM layout analysis.
+- **Wide Strip Segmentation**: Single-line strips with $w \ge 320\text{px}$ and $w/h \ge 3.5$ are segmented at whitespace gaps (`getWideStripSegments`, minGap = 12) with vertical margin exclusion (10%) to prevent LSTM attention drift, falling back to PSM 6 on empty segments.
+- **Contrast Dynamic Range Normalization**: Low/medium contrast snippet regions ($35 \le \text{range} \le 165$) are normalized to provide crisp separation for Otsu binarization (linear mapping for light borders, power curve for dark/photo backgrounds).
 
 ### F. Lightbox Snippet OCR & Canvas Memory
 - **Coordinate Projection & Buffer**: Viewport selection box converts to native image coordinates using:
@@ -92,10 +94,10 @@ This document provides system design, architectural invariants, communication pr
 | `bi()` | `src/content/shared/download-manager.js` | Downloads single image with sanitized Unicode filename |
 | `Cs()` / `batchDownloadAllImages` | `src/content/shared/download-manager.js` | Concurrency-limited (pool=4) batch download with JSZip |
 | `uiToast()` | `src/content/ui/toast.js` | Persistent status notification (`duration: 0` during OCR, 3.5s fadeout) |
-| `cleanOcrText()` / `disambiguateCjkCharacters()` | `src/content/ocr/text-cleaner.js` | Strips pipes (`\|`), cleans chevrons, disambiguates CJK confusion families |
+| `cleanOcrText()` / `disambiguateCjkCharacters()` | `src/content/ocr/text-cleaner.js` | Strips pipes (`\|`), cleans chevrons, protects numbers/percentages, disambiguates CJK |
 | `calculateImageCropBounds()` / `startLightboxCrop()` | `src/content/ui/lightbox-crop.js` | Lightbox coordinate projection with 18px buffer and rAF drag selection |
 | `renderModernViewerToolbar()` | `src/content/ui/viewer-lightbox.js` | Modern 44px glassmorphism capsule with SVG icons & crop action |
-| `enhanceImageForOcr()` | `src/offscreen/image-enhancer.js` | 2x upscaling for small text, polarity inversion for dark background |
+| `enhanceImageForOcr()` / `getWideStripSegments()` | `src/offscreen/image-enhancer.js` | 2x upscaling, polarity inversion, contrast stretch, whitespace gap segmenter |
 | `ocrImageToText()` | `src/content/ocr/ocr-service.js` | Dispatches image to background/offscreen, fallbacks to TextDetector |
 
 ---

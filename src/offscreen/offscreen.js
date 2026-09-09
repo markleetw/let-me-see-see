@@ -5,7 +5,7 @@
 import { getTesseractWorker } from "./tesseract-client.js";
 import { extractLinesFromResult } from "./line-extractor.js";
 import { copyToOffscreenClipboard } from "./clipboard-fallback.js";
-import { enhanceImageForOcr } from "./image-enhancer.js";
+import { enhanceImageForOcr, getWideStripSegments } from "./image-enhancer.js";
 
 // Export for tests and global execution
 if (typeof globalThis !== "undefined") {
@@ -13,17 +13,20 @@ if (typeof globalThis !== "undefined") {
   globalThis.copyToOffscreenClipboard = copyToOffscreenClipboard;
   globalThis.getTesseractWorker = getTesseractWorker;
   globalThis.enhanceImageForOcr = enhanceImageForOcr;
+  globalThis.getWideStripSegments = getWideStripSegments;
 }
 if (typeof window !== "undefined") {
   window.__letMeSeeSeeOffscreen = {
     extractLinesFromResult,
     copyToOffscreenClipboard,
     getTesseractWorker,
-    enhanceImageForOcr
+    enhanceImageForOcr,
+    getWideStripSegments
   };
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || message.target !== "offscreen") {
     return;
   }
@@ -48,13 +51,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const worker = await getTesseractWorker();
-        const enhancedImg = await enhanceImageForOcr(message.image);
-        let res = await worker.recognize(enhancedImg);
-        let lines = extractLinesFromResult(res);
-        let text = lines.join("\n");
-        if (!text && res?.data?.text) {
-          text = res.data.text.trim();
-        }
+        const segments = await getWideStripSegments(message.image, 20);
+
+        let res = null;
+        let lines = [];
+        let text = "";
+
+        if (segments && segments.length > 1) {
+          const segLines = [];
+          for (const segUrl of segments) {
+            const segRes = await worker.recognize(segUrl);
+            const l = extractLinesFromResult(segRes);
+            const t = l.join(" ") || (segRes?.data?.text || "").trim();
+            if (t) segLines.push(t);
+          }
+          text = segLines.join(" ");
+          lines = [text];
+        } else {
+          const enhancedImg = await enhanceImageForOcr(message.image);
+          res = await worker.recognize(enhancedImg);
+          lines = extractLinesFromResult(res);
+          text = lines.join("\n");
+          if (!text && res?.data?.text) {
+            text = res.data.text.trim();
+          }
 
         // Snippet / Single-line fallback: if automatic layout (PSM 3) found no text,
         // retry assuming single uniform text block (PSM 6)
@@ -76,6 +96,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               await worker.setParameters({ tessedit_pageseg_mode: "3" });
             } catch {}
           }
+        }
         }
 
         const structuredLines = (res?.data?.lines || [])
@@ -109,3 +130,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+}

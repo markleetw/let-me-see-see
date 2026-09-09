@@ -20,10 +20,7 @@ export async function enhanceImageForOcr(imageSource) {
 
     // 1. Adaptive 2x Upscaling for small snippets / cropped single-line images
     // Tesseract LSTM requires character height of ~30-35px.
-    // If image height < 140px or small low-res box (<220px high and <350px wide),
-    // fine strokes benefit from 2x scaling.
-    // Larger document/table screenshots (e.g. 1024x319) MUST maintain 1:1 native resolution
-    // to prevent font anti-aliasing blur and yellow/colored cell wash-out.
+    // Small cropped boxes (<140px high or <220px high and <350px wide) benefit from 2x scaling.
     let scale = 1;
     if (origH < 140 || (origH < 220 && origW < 350)) {
       scale = 2;
@@ -172,4 +169,106 @@ function loadImageElement(src) {
     img.onerror = (err) => reject(err);
     img.src = src;
   });
+}
+
+/**
+ * Split wide single-line horizontal strips at whitespace gaps to prevent Tesseract LSTM drift.
+ * Triggered only for horizontal strips with width > 450px and height < 140px (aspect ratio >= 4.0).
+ */
+export async function getWideStripSegments(imageSource, minGap = 20) {
+  try {
+    const img = await loadImageElement(imageSource);
+    if (!img || !img.width || !img.height) return null;
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+
+    if (h > 140 || w < 450 || w / h < 4.0) {
+      return null;
+    }
+
+    const cvs = document.createElement("canvas");
+    cvs.width = w;
+    cvs.height = h;
+    const ctx = cvs.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, w, h).data;
+
+    const whiteCols = [];
+    for (let x = 0; x < w; x++) {
+      let isColWhite = true;
+      for (let y = 0; y < h; y++) {
+        const idx = (y * w + x) * 4;
+        if (data[idx + 3] < 30) continue;
+        const luma = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        if (luma < 215) {
+          isColWhite = false;
+          break;
+        }
+      }
+      if (isColWhite) whiteCols.push(x);
+    }
+
+    const cutPoints = [];
+    let curStart = null;
+    for (let i = 0; i < whiteCols.length; i++) {
+      const x = whiteCols[i];
+      if (curStart === null) curStart = x;
+      else if (x !== whiteCols[i - 1] + 1) {
+        if (whiteCols[i - 1] - curStart >= minGap) {
+          cutPoints.push(Math.round((curStart + whiteCols[i - 1]) / 2));
+        }
+        curStart = x;
+      }
+    }
+    if (curStart !== null && whiteCols[whiteCols.length - 1] - curStart >= minGap) {
+      cutPoints.push(Math.round((curStart + whiteCols[whiteCols.length - 1]) / 2));
+    }
+
+    if (cutPoints.length === 0) {
+      cvs.width = 0;
+      cvs.height = 0;
+      return null;
+    }
+
+    const segments = [];
+    let prevCut = 0;
+    for (const cut of cutPoints) {
+      if (cut - prevCut > 30) {
+        segments.push({ x: prevCut, w: cut - prevCut });
+      }
+      prevCut = cut;
+    }
+    if (w - prevCut > 30) {
+      segments.push({ x: prevCut, w: w - prevCut });
+    }
+
+    if (segments.length <= 1) {
+      cvs.width = 0;
+      cvs.height = 0;
+      return null;
+    }
+
+    const results = segments.map((seg) => {
+      const pad = 24;
+      const segCvs = document.createElement("canvas");
+      segCvs.width = seg.w + pad * 2;
+      segCvs.height = h + pad * 2;
+      const sCtx = segCvs.getContext("2d");
+      sCtx.fillStyle = "#ffffff";
+      sCtx.fillRect(0, 0, segCvs.width, segCvs.height);
+      sCtx.drawImage(img, seg.x, 0, seg.w, h, pad, pad, seg.w, h);
+      const dataUrl = segCvs.toDataURL("image/png");
+      segCvs.width = 0;
+      segCvs.height = 0;
+      return dataUrl;
+    });
+
+    cvs.width = 0;
+    cvs.height = 0;
+    return results;
+  } catch (err) {
+    console.warn("[Let Me See See] Strip segmentation error:", err);
+    return null;
+  }
 }

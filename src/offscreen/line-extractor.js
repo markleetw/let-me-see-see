@@ -23,9 +23,9 @@ export function extractLinesFromResult(result) {
         if (typeof w.confidence !== "number") return true;
         const txt = (w.text || "").trim();
         const wordHasCjk = /[\u4e00-\u9fa5]/.test(txt);
-        if (wordHasCjk) return w.confidence >= 35;
+        if (wordHasCjk) return w.confidence >= 12;
         if (txt.length <= 1) return w.confidence >= 50;
-        return w.confidence >= (hasValidTokens ? 35 : 45);
+        return w.confidence >= (hasValidTokens ? 30 : 45);
       });
 
       if (validWords.length === 0) continue;

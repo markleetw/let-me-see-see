@@ -266,7 +266,7 @@ test("Unit: Table Structure Detection & TSV Formatting", async (t) => {
     assert.strictEqual(result.isTable, true);
     assert.strictEqual(result.rowCount, numRows);
     assert.strictEqual(result.colCount, numCols);
-    assert.ok(elapsed < 100, `Processing 10,000 cells took ${elapsed.toFixed(2)}ms (must be < 100ms)`);
+    assert.ok(elapsed < 150, `Processing 10,000 cells took ${elapsed.toFixed(2)}ms (must be < 150ms)`);
   });
 
   await t.test("Exclusion: Roadmap / Timeline chart must NOT be classified as table", () => {

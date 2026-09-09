@@ -202,5 +202,71 @@ test("Unit: Image Enhancer for Offline OCR", async (t) => {
       globalThis.Image = origImg;
     }
   });
+
+  await t.test("Wide Strip Segmentation: ignores normal images and segments wide strips with gaps", async () => {
+    const { getWideStripSegments } = await import("../../src/offscreen/image-enhancer.js");
+
+    const origDoc = globalThis.document;
+    const origImg = globalThis.Image;
+
+    try {
+      // 1. Normal aspect ratio (500x400) -> returns null
+      globalThis.Image = class {
+        constructor() {
+          this.width = 500;
+          this.height = 400;
+          setTimeout(() => this.onload?.(), 0);
+        }
+      };
+      const resNormal = await getWideStripSegments("data:image/png;base64,normal");
+      assert.strictEqual(resNormal, null, "Normal document image must NOT be segmented");
+
+      // 2. Wide strip (1000x60) with a 30px gap in the middle -> returns 2 segments
+      globalThis.Image = class {
+        constructor() {
+          this.width = 1000;
+          this.height = 60;
+          setTimeout(() => this.onload?.(), 0);
+        }
+      };
+
+      const mockCtx = {
+        drawImage: () => {},
+        fillRect: () => {},
+        getImageData: (x, y, w, h) => {
+          // Pixel data: columns 450 to 500 are pure white (luma 255)
+          const data = new Uint8ClampedArray(w * h * 4);
+          for (let py = 0; py < h; py++) {
+            for (let px = 0; px < w; px++) {
+              const idx = (py * w + px) * 4;
+              const isWhiteCol = px >= 450 && px <= 500;
+              const val = isWhiteCol ? 255 : 50;
+              data[idx] = val;
+              data[idx + 1] = val;
+              data[idx + 2] = val;
+              data[idx + 3] = 255;
+            }
+          }
+          return { data };
+        }
+      };
+
+      globalThis.document = {
+        createElement: (tag) => (tag === "canvas" ? {
+          width: 0,
+          height: 0,
+          getContext: () => mockCtx,
+          toDataURL: () => "data:image/png;base64,mockSegment"
+        } : {})
+      };
+
+      const resWide = await getWideStripSegments("data:image/png;base64,wide");
+      assert.ok(Array.isArray(resWide), "Wide strip with gaps must return array of segments");
+      assert.strictEqual(resWide.length, 2, "Must split into exactly 2 segments across gap");
+    } finally {
+      globalThis.document = origDoc;
+      globalThis.Image = origImg;
+    }
+  });
 });
 

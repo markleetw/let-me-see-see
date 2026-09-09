@@ -10,7 +10,20 @@ import { copyTextToClipboard } from "../shared/clipboard.js";
 import { rasterToDataUrl } from "../shared/image-matcher.js";
 import { getImageBitmap } from "../shared/lru-cache.js";
 
+function cleanupCropButtonStates() {
+  if (typeof document !== "undefined") {
+    document.querySelectorAll(".viewer-crop-ocr-btn, [data-viewer-action='cropOcr']").forEach((btn) => {
+      btn.classList.remove("is-active");
+      if (typeof btn.blur === "function") btn.blur();
+    });
+    document.querySelectorAll(".viewer-container.lmss-crop-active").forEach((c) => {
+      c.classList.remove("lmss-crop-active");
+    });
+  }
+}
+
 export async function ocrImageToText(imgUrl, options = {}) {
+  cleanupCropButtonStates();
   if (!imgUrl) {
     uiToast("未指定圖片，無法進行文字辨識", 3000);
     return false;
@@ -99,6 +112,7 @@ export async function ocrImageToText(imgUrl, options = {}) {
               if (copyResp?.copied) copied = true;
             } catch {}
           }
+          cleanupCropButtonStates();
           if (tableResult.isTable) {
             uiToast(`📊 已辨識表格結構並複製為試算表格式 (TSV)！(${tableResult.rowCount} 列 × ${tableResult.colCount} 欄)`, 3500);
           } else {
@@ -186,12 +200,14 @@ export async function ocrImageToText(imgUrl, options = {}) {
       if (metaText && metaText.trim()) {
         const cleanText = cleanOcrText(metaText.trim());
         await copyTextToClipboard(cleanText);
+        cleanupCropButtonStates();
         uiToast(`已成功複製文字至剪貼簿！(${cleanText.length} 字)`, 3500);
         return true;
       }
     }
   } catch {}
 
+  cleanupCropButtonStates();
   uiToast("圖片中未偵測到文字", 3000);
   return false;
 }

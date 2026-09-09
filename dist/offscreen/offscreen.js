@@ -57,9 +57,9 @@
           if (typeof w.confidence !== "number") return true;
           const txt = (w.text || "").trim();
           const wordHasCjk = /[\u4e00-\u9fa5]/.test(txt);
-          if (wordHasCjk) return w.confidence >= 35;
+          if (wordHasCjk) return w.confidence >= 12;
           if (txt.length <= 1) return w.confidence >= 50;
-          return w.confidence >= (hasValidTokens ? 35 : 45);
+          return w.confidence >= (hasValidTokens ? 30 : 45);
         });
         if (validWords.length === 0) continue;
         let lineStr = "";
@@ -233,6 +233,94 @@
       img.src = src;
     });
   }
+  async function getWideStripSegments(imageSource, minGap = 20) {
+    try {
+      const img = await loadImageElement(imageSource);
+      if (!img || !img.width || !img.height) return null;
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (h > 140 || w < 450 || w / h < 4) {
+        return null;
+      }
+      const cvs = document.createElement("canvas");
+      cvs.width = w;
+      cvs.height = h;
+      const ctx = cvs.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      const whiteCols = [];
+      for (let x = 0; x < w; x++) {
+        let isColWhite = true;
+        for (let y = 0; y < h; y++) {
+          const idx = (y * w + x) * 4;
+          if (data[idx + 3] < 30) continue;
+          const luma = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+          if (luma < 215) {
+            isColWhite = false;
+            break;
+          }
+        }
+        if (isColWhite) whiteCols.push(x);
+      }
+      const cutPoints = [];
+      let curStart = null;
+      for (let i = 0; i < whiteCols.length; i++) {
+        const x = whiteCols[i];
+        if (curStart === null) curStart = x;
+        else if (x !== whiteCols[i - 1] + 1) {
+          if (whiteCols[i - 1] - curStart >= minGap) {
+            cutPoints.push(Math.round((curStart + whiteCols[i - 1]) / 2));
+          }
+          curStart = x;
+        }
+      }
+      if (curStart !== null && whiteCols[whiteCols.length - 1] - curStart >= minGap) {
+        cutPoints.push(Math.round((curStart + whiteCols[whiteCols.length - 1]) / 2));
+      }
+      if (cutPoints.length === 0) {
+        cvs.width = 0;
+        cvs.height = 0;
+        return null;
+      }
+      const segments = [];
+      let prevCut = 0;
+      for (const cut of cutPoints) {
+        if (cut - prevCut > 30) {
+          segments.push({ x: prevCut, w: cut - prevCut });
+        }
+        prevCut = cut;
+      }
+      if (w - prevCut > 30) {
+        segments.push({ x: prevCut, w: w - prevCut });
+      }
+      if (segments.length <= 1) {
+        cvs.width = 0;
+        cvs.height = 0;
+        return null;
+      }
+      const results = segments.map((seg) => {
+        const pad = 24;
+        const segCvs = document.createElement("canvas");
+        segCvs.width = seg.w + pad * 2;
+        segCvs.height = h + pad * 2;
+        const sCtx = segCvs.getContext("2d");
+        sCtx.fillStyle = "#ffffff";
+        sCtx.fillRect(0, 0, segCvs.width, segCvs.height);
+        sCtx.drawImage(img, seg.x, 0, seg.w, h, pad, pad, seg.w, h);
+        const dataUrl = segCvs.toDataURL("image/png");
+        segCvs.width = 0;
+        segCvs.height = 0;
+        return dataUrl;
+      });
+      cvs.width = 0;
+      cvs.height = 0;
+      return results;
+    } catch (err) {
+      console.warn("[Let Me See See] Strip segmentation error:", err);
+      return null;
+    }
+  }
 
   // src/offscreen/offscreen.js
   if (typeof globalThis !== "undefined") {
@@ -240,85 +328,105 @@
     globalThis.copyToOffscreenClipboard = copyToOffscreenClipboard;
     globalThis.getTesseractWorker = getTesseractWorker;
     globalThis.enhanceImageForOcr = enhanceImageForOcr;
+    globalThis.getWideStripSegments = getWideStripSegments;
   }
   if (typeof window !== "undefined") {
     window.__letMeSeeSeeOffscreen = {
       extractLinesFromResult,
       copyToOffscreenClipboard,
       getTesseractWorker,
-      enhanceImageForOcr
+      enhanceImageForOcr,
+      getWideStripSegments
     };
   }
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message || message.target !== "offscreen") {
-      return;
-    }
-    if (message.type === "prewarm-ocr") {
-      getTesseractWorker().catch((err) => console.warn("[Offscreen OCR Prewarm Error]", err));
-      sendResponse({ success: true, prewarming: true });
-      return true;
-    }
-    if (message.type === "copy-to-clipboard") {
-      copyToOffscreenClipboard(message.text).then((copied) => {
-        sendResponse({ success: true, copied });
-      });
-      return true;
-    }
-    if (message.type === "do-ocr") {
-      (async () => {
-        try {
-          const worker = await getTesseractWorker();
-          const enhancedImg = await enhanceImageForOcr(message.image);
-          let res = await worker.recognize(enhancedImg);
-          let lines = extractLinesFromResult(res);
-          let text = lines.join("\n");
-          if (!text && res?.data?.text) {
-            text = res.data.text.trim();
-          }
-          if (!text && worker && typeof worker.setParameters === "function") {
-            try {
-              await worker.setParameters({ tessedit_pageseg_mode: "6" });
-              const retryRes = await worker.recognize(enhancedImg);
-              const retryLines = extractLinesFromResult(retryRes);
-              const retryText = retryLines.join("\n") || (retryRes?.data?.text || "").trim();
-              if (retryText) {
-                res = retryRes;
-                lines = retryLines;
-                text = retryText;
+  if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (!message || message.target !== "offscreen") {
+        return;
+      }
+      if (message.type === "prewarm-ocr") {
+        getTesseractWorker().catch((err) => console.warn("[Offscreen OCR Prewarm Error]", err));
+        sendResponse({ success: true, prewarming: true });
+        return true;
+      }
+      if (message.type === "copy-to-clipboard") {
+        copyToOffscreenClipboard(message.text).then((copied) => {
+          sendResponse({ success: true, copied });
+        });
+        return true;
+      }
+      if (message.type === "do-ocr") {
+        (async () => {
+          try {
+            const worker = await getTesseractWorker();
+            const segments = await getWideStripSegments(message.image, 20);
+            let res = null;
+            let lines = [];
+            let text = "";
+            if (segments && segments.length > 1) {
+              const segLines = [];
+              for (const segUrl of segments) {
+                const segRes = await worker.recognize(segUrl);
+                const l = extractLinesFromResult(segRes);
+                const t = l.join(" ") || (segRes?.data?.text || "").trim();
+                if (t) segLines.push(t);
               }
-            } catch (retryErr) {
-              console.warn("[Offscreen OCR] PSM 6 retry error:", retryErr);
-            } finally {
-              try {
-                await worker.setParameters({ tessedit_pageseg_mode: "3" });
-              } catch {
+              text = segLines.join(" ");
+              lines = [text];
+            } else {
+              const enhancedImg = await enhanceImageForOcr(message.image);
+              res = await worker.recognize(enhancedImg);
+              lines = extractLinesFromResult(res);
+              text = lines.join("\n");
+              if (!text && res?.data?.text) {
+                text = res.data.text.trim();
+              }
+              if (!text && worker && typeof worker.setParameters === "function") {
+                try {
+                  await worker.setParameters({ tessedit_pageseg_mode: "6" });
+                  const retryRes = await worker.recognize(enhancedImg);
+                  const retryLines = extractLinesFromResult(retryRes);
+                  const retryText = retryLines.join("\n") || (retryRes?.data?.text || "").trim();
+                  if (retryText) {
+                    res = retryRes;
+                    lines = retryLines;
+                    text = retryText;
+                  }
+                } catch (retryErr) {
+                  console.warn("[Offscreen OCR] PSM 6 retry error:", retryErr);
+                } finally {
+                  try {
+                    await worker.setParameters({ tessedit_pageseg_mode: "3" });
+                  } catch {
+                  }
+                }
               }
             }
+            const structuredLines = (res?.data?.lines || []).filter((l) => {
+              if (typeof l.confidence === "number" && l.confidence < 25) return false;
+              return true;
+            }).map((l) => ({
+              text: l.text,
+              bbox: l.bbox ? { x0: l.bbox.x0, y0: l.bbox.y0, x1: l.bbox.x1, y1: l.bbox.y1 } : null,
+              words: (l.words || []).filter((w) => {
+                if (typeof w.confidence === "number" && w.confidence < 25) return false;
+                const t = (w.text || "").trim();
+                return t && !/^[\s._\-|\/\\]+$/.test(t);
+              }).map((w) => ({
+                text: w.text,
+                confidence: w.confidence,
+                bbox: w.bbox ? { x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 } : null
+              }))
+            })).filter((l) => l.words.length > 0);
+            sendResponse({ success: true, text, ocrData: { lines: structuredLines } });
+          } catch (err) {
+            console.error("[Offscreen OCR Error]", err);
+            sendResponse({ success: false, error: err?.message || String(err) });
           }
-          const structuredLines = (res?.data?.lines || []).filter((l) => {
-            if (typeof l.confidence === "number" && l.confidence < 25) return false;
-            return true;
-          }).map((l) => ({
-            text: l.text,
-            bbox: l.bbox ? { x0: l.bbox.x0, y0: l.bbox.y0, x1: l.bbox.x1, y1: l.bbox.y1 } : null,
-            words: (l.words || []).filter((w) => {
-              if (typeof w.confidence === "number" && w.confidence < 25) return false;
-              const t = (w.text || "").trim();
-              return t && !/^[\s._\-|\/\\]+$/.test(t);
-            }).map((w) => ({
-              text: w.text,
-              confidence: w.confidence,
-              bbox: w.bbox ? { x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 } : null
-            }))
-          })).filter((l) => l.words.length > 0);
-          sendResponse({ success: true, text, ocrData: { lines: structuredLines } });
-        } catch (err) {
-          console.error("[Offscreen OCR Error]", err);
-          sendResponse({ success: false, error: err?.message || String(err) });
-        }
-      })();
-      return true;
-    }
-  });
+        })();
+        return true;
+      }
+    });
+  }
 })();
 var extractLinesFromResult = typeof window !== 'undefined' && window.__letMeSeeSeeOffscreen ? window.__letMeSeeSeeOffscreen.extractLinesFromResult : (typeof globalThis !== 'undefined' ? globalThis.extractLinesFromResult : undefined);

@@ -58,6 +58,12 @@
   transform: translateY(0) scale(0.94) !important;
 }
 
+.viewer-toolbar > ul > li:focus,
+.viewer-toolbar > ul > li:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 .viewer-toolbar > ul > li svg {
   width: 20px;
   height: 20px;
@@ -169,5 +175,11 @@
 @keyframes lmssFadeDown {
   from { opacity: 0; transform: translate(-50%, -12px); }
   to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* Float toast cleanly above the viewer toolbar when lightbox is active */
+.viewer-container.viewer-in ~ #let-me-see-see-toast,
+body:has(.viewer-container.viewer-in) #let-me-see-see-toast {
+  bottom: 92px !important;
 }
 

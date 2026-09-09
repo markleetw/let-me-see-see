@@ -3537,12 +3537,14 @@
       clearTimeout(toastTimeoutId);
       toastTimeoutId = null;
     }
+    const isViewerActive = typeof document !== "undefined" && !!document.querySelector(".viewer-container.viewer-in, .viewer-container:not(.viewer-hide)");
+    const bottomOffset = isViewerActive ? "92px" : "28px";
     if (!toastEl) {
       toastEl = document.createElement("div");
       toastEl.id = "let-me-see-see-toast";
       Object.assign(toastEl.style, {
         position: "fixed",
-        bottom: "28px",
+        bottom: bottomOffset,
         left: "50%",
         transform: "translateX(-50%)",
         backgroundColor: "rgba(33,33,33,0.92)",
@@ -3554,11 +3556,12 @@
         zIndex: "2147483647",
         boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
         pointerEvents: "none",
-        transition: "opacity 0.25s ease,transform 0.25s ease",
+        transition: "opacity 0.25s ease,transform 0.25s ease,bottom 0.25s ease",
         opacity: "1"
       });
       document.body.appendChild(toastEl);
     } else {
+      toastEl.style.bottom = bottomOffset;
       toastEl.style.opacity = "1";
       toastEl.style.transform = "translateX(-50%)";
     }
@@ -3737,7 +3740,16 @@
         rafId3 = null;
       }
       container.classList.remove("lmss-crop-active");
-      if (cropBtn) cropBtn.classList.remove("is-active");
+      if (cropBtn) {
+        cropBtn.classList.remove("is-active");
+        if (typeof cropBtn.blur === "function") cropBtn.blur();
+      }
+      if (typeof document !== "undefined" && typeof document.querySelectorAll === "function") {
+        document.querySelectorAll(".viewer-crop-ocr-btn, [data-viewer-action='cropOcr']").forEach((btn) => {
+          btn.classList.remove("is-active");
+          if (typeof btn.blur === "function") btn.blur();
+        });
+      }
       hintBanner.remove();
       overlay.remove();
       window.removeEventListener("pointermove", onDragMove, true);
@@ -3800,7 +3812,12 @@
       const cjkPunc = "[\\u4e00-\\u9fa5\\u3000-\\u303f\\uff00-\\uffef]";
       line = line.replace(new RegExp(`(${cjkPunc})\\s+(?=${cjkPunc})`, "g"), "$1");
       line = line.replace(/([\u4e00-\u9fa5])\s*[.．·・•]\s*(?=[\u4e00-\u9fa5])/g, "$1\uFF0E");
-      line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:[a-zA-Z]{1,4}|[►▶>»~^"'\-]+)\s*([」』])/g, "$1$2");
+      line = line.replace(/(?:^|\s+)\[(?=[\u4e00-\u9fa5])/g, "\u300C");
+      line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:[a-zA-Z]{1,4}|[►▶>»~^"'\-]+|\s*[>▶►]\s*[a-zA-Z]?)*\s*[」』J]+/g, "$1\u300D");
+      line = line.replace(/[」』]{2,}/g, "\u300D");
+      line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*ARR[a-zA-Z]*\s*$/gi, "$1\u300D");
+      line = line.replace(/\s*["'“]*ARR[a-zA-Z]*\s*$/gi, "");
+      line = line.replace(/」\s*([「])/g, "\u300D\u300C");
       line = disambiguateCjkCharacters(line);
       line = line.replace(/\b(?:usS|uss|USS|uS\$|Us\$)\b/g, "US$");
       line = line.replace(/\busS\s*/g, "US$ ");
@@ -3892,6 +3909,9 @@
     val = val.replace(/[笑咲]座/g, "\u7B45\u5EA7");
     val = val.replace(/百本[笑咲]/g, "\u767E\u672C\u7B45");
     val = val.replace(/竹[笑咲]/g, "\u7AF9\u7B45");
+    val = val.replace(/(?<![\u4e00-\u9fa5])口抹茶/g, "\u7247\u53E3\u62B9\u8336");
+    val = val.replace(/質硬/g, "\u8CEA\u611F");
+    val = val.replace(/十中圓舞曲/g, "\u96E8\u4E2D\u5713\u821E\u66F2");
     val = val.replace(/雨用/g, "\u5169\u7528");
     val = val.replace(/雨([種者個款件組套面色岸難倍側旁端邊隻條位次張把台瓶盒度])/g, "\u5169$1");
     val = val.replace(/兩([衣傘靴])/g, "\u96E8$1");
@@ -4612,7 +4632,19 @@
   }
 
   // src/content/ocr/ocr-service.js
+  function cleanupCropButtonStates() {
+    if (typeof document !== "undefined") {
+      document.querySelectorAll(".viewer-crop-ocr-btn, [data-viewer-action='cropOcr']").forEach((btn) => {
+        btn.classList.remove("is-active");
+        if (typeof btn.blur === "function") btn.blur();
+      });
+      document.querySelectorAll(".viewer-container.lmss-crop-active").forEach((c) => {
+        c.classList.remove("lmss-crop-active");
+      });
+    }
+  }
   async function ocrImageToText(imgUrl, options = {}) {
+    cleanupCropButtonStates();
     if (!imgUrl) {
       uiToast("\u672A\u6307\u5B9A\u5716\u7247\uFF0C\u7121\u6CD5\u9032\u884C\u6587\u5B57\u8FA8\u8B58", 3e3);
       return false;
@@ -4696,6 +4728,7 @@
               } catch {
               }
             }
+            cleanupCropButtonStates();
             if (tableResult.isTable) {
               uiToast(`\u{1F4CA} \u5DF2\u8FA8\u8B58\u8868\u683C\u7D50\u69CB\u4E26\u8907\u88FD\u70BA\u8A66\u7B97\u8868\u683C\u5F0F (TSV)\uFF01(${tableResult.rowCount} \u5217 \xD7 ${tableResult.colCount} \u6B04)`, 3500);
             } else {
@@ -4780,12 +4813,14 @@
         if (metaText && metaText.trim()) {
           const cleanText = cleanOcrText(metaText.trim());
           await copyTextToClipboard(cleanText);
+          cleanupCropButtonStates();
           uiToast(`\u5DF2\u6210\u529F\u8907\u88FD\u6587\u5B57\u81F3\u526A\u8CBC\u7C3F\uFF01(${cleanText.length} \u5B57)`, 3500);
           return true;
         }
       }
     } catch {
     }
+    cleanupCropButtonStates();
     uiToast("\u5716\u7247\u4E2D\u672A\u5075\u6E2C\u5230\u6587\u5B57", 3e3);
     return false;
   }

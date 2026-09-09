@@ -72,4 +72,29 @@ test("Unit: Offscreen Line Extractor & OCR Token Filter", async (t) => {
     assert.strictEqual(lines.length, 1);
     assert.strictEqual(lines[0], "專案執行狀況");
   });
+
+  await t.test("Preserves low-confidence CJK tokens (e.g. 片 at 15.5%) when overall line confidence is high", () => {
+    const mockResult = {
+      data: {
+        lines: [
+          {
+            confidence: 85,
+            text: "matcha-tw 的「片口抹茶碗推薦",
+            words: [
+              { text: "matcha-tw", confidence: 93 },
+              { text: "的", confidence: 93 },
+              { text: "「", confidence: 90 },
+              { text: "片", confidence: 15.5 },
+              { text: "口", confidence: 93 },
+              { text: "抹茶碗推薦", confidence: 94 }
+            ]
+          }
+        ]
+      }
+    };
+
+    const lines = extractLinesFromResult(mockResult);
+    assert.strictEqual(lines.length, 1);
+    assert.ok(lines[0].includes("片口"), "Character 片 with 15.5% confidence must NOT be dropped");
+  });
 });

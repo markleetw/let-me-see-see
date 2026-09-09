@@ -61,10 +61,22 @@ export function cleanOcrText(text) {
     // Clean center dot between CJK characters (e.g. "茶筅架 . 茶筅座" -> "茶筅架．茶筅座")
     line = line.replace(/([\u4e00-\u9fa5])\s*[.．·・•]\s*(?=[\u4e00-\u9fa5])/g, "$1．");
 
-    // Clean trailing chevron/arrow hallucinations inside quotes (e.g. 「防水鞋 m」 -> 「防水鞋」, 「會呼吸的雨衣 "ARR」 -> 「會呼吸的雨衣」)
-    line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:[a-zA-Z]{1,4}|[►▶>»~^"'\-]+)\s*([」』])/g, "$1$2");
+    // Normalize opening quotation marks / brackets
+    line = line.replace(/(?:^|\s+)\[(?=[\u4e00-\u9fa5])/g, "「");
 
-    // Contextual CJK disambiguation (e.g. 雨 vs 兩, 茶筅 vs 茶笑)
+    // Clean trailing chevron/arrow hallucinations inside quotes
+    // e.g. 「防水鞋 m」 -> 「防水鞋」, 「會呼吸的雨衣 "ARR」 -> 「會呼吸的雨衣」, 「會呼吸的雨衣 > J」 -> 「會呼吸的雨衣」
+    line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*(?:[a-zA-Z]{1,4}|[►▶>»~^"'\-]+|\s*[>▶►]\s*[a-zA-Z]?)*\s*[」』J]+/g, "$1」");
+    line = line.replace(/[」』]{2,}/g, "」");
+
+    // Clean stray trailing ARR noise if remaining (and close quote if after CJK)
+    line = line.replace(/([\u4e00-\u9fa5])\s*["'“]*ARR[a-zA-Z]*\s*$/gi, "$1」");
+    line = line.replace(/\s*["'“]*ARR[a-zA-Z]*\s*$/gi, "");
+
+    // Normalize spacing between quotes
+    line = line.replace(/」\s*([「])/g, "」「");
+
+    // Contextual CJK disambiguation (e.g. 雨 vs 兩, 茶筅 vs 茶笑, 質感 vs 質硬)
     line = disambiguateCjkCharacters(line);
 
     // Normalize Currency: usS, USS, us$, etc. -> US$
@@ -208,6 +220,15 @@ export function disambiguateCjkCharacters(text) {
   val = val.replace(/[笑咲]座/g, "筅座");
   val = val.replace(/百本[笑咲]/g, "百本筅");
   val = val.replace(/竹[笑咲]/g, "竹筅");
+
+  // Fix missing '片' before '口抹茶' (e.g. 「口抹茶碗推薦」 -> 「片口抹茶碗推薦」)
+  val = val.replace(/(?<![\u4e00-\u9fa5])口抹茶/g, "片口抹茶");
+
+  // Fix '質硬' falsely recognized where '質感' is intended (e.g. 質感雨具)
+  val = val.replace(/質硬/g, "質感");
+
+  // Fix '十中圓舞曲' -> '雨中圓舞曲'
+  val = val.replace(/十中圓舞曲/g, "雨中圓舞曲");
 
   // 1. Fix '雨' falsely recognized where '兩' is the intended character:
   // e.g. "雨用" -> "兩用" (兩用托特包, 兩用後背包, 兩用手提包, 兩用包, 晴雨兩用)

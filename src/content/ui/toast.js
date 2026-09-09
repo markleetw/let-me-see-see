@@ -15,12 +15,15 @@ export function uiToast(message, duration = 3000) {
     toastTimeoutId = null;
   }
 
+  const isViewerActive = typeof document !== "undefined" && !!document.querySelector(".viewer-container.viewer-in, .viewer-container:not(.viewer-hide)");
+  const bottomOffset = isViewerActive ? "92px" : "28px";
+
   if (!toastEl) {
     toastEl = document.createElement("div");
     toastEl.id = "let-me-see-see-toast";
     Object.assign(toastEl.style, {
       position: "fixed",
-      bottom: "28px",
+      bottom: bottomOffset,
       left: "50%",
       transform: "translateX(-50%)",
       backgroundColor: "rgba(33,33,33,0.92)",
@@ -32,11 +35,12 @@ export function uiToast(message, duration = 3000) {
       zIndex: "2147483647",
       boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
       pointerEvents: "none",
-      transition: "opacity 0.25s ease,transform 0.25s ease",
+      transition: "opacity 0.25s ease,transform 0.25s ease,bottom 0.25s ease",
       opacity: "1"
     });
     document.body.appendChild(toastEl);
   } else {
+    toastEl.style.bottom = bottomOffset;
     toastEl.style.opacity = "1";
     toastEl.style.transform = "translateX(-50%)";
   }

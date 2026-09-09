@@ -83,9 +83,23 @@ test("Unit: OCR Text Cleaner & ReDoS Guard", async (t) => {
     const cleaned1 = cleanOcrText(input1);
     assert.strictEqual(cleaned1, 'matcha-tw 的「片口抹茶碗推薦 | 輕鬆打出細膩茶泡」「茶筅架．茶筅座」');
 
+    // Square bracket normalization and missing 片 auto-recovery
+    const input1b = 'matcha-tw 的 [口抹茶碗推薦 | 輕鬆打出細膩茶泡」「茶笑架 . 茶笑座」';
+    const cleaned1b = cleanOcrText(input1b);
+    assert.strictEqual(cleaned1b, 'matcha-tw 的「片口抹茶碗推薦 | 輕鬆打出細膩茶泡」「茶筅架．茶筅座」');
+
     const input2 = '雨中圓舞曲 的「防水鞋 m」「會呼吸的雨衣 "ARR」「質感雨具 ▶」';
     const cleaned2 = cleanOcrText(input2);
     assert.strictEqual(cleaned2, '雨中圓舞曲的「防水鞋」「會呼吸的雨衣」「質感雨具」');
+
+    // 質感 / 質硬 disambiguation and trailing ARR cleanup
+    const input2b = '雨中圓舞曲 的「防水鞋 >」「會呼吸的兩衣 > J」「質硬雨具 y」';
+    const cleaned2b = cleanOcrText(input2b);
+    assert.strictEqual(cleaned2b, '雨中圓舞曲的「防水鞋」「會呼吸的雨衣」「質感雨具」');
+
+    const input2c = '雨中圓舞曲 的「防水鞋 m」「會呼吸的雨衣 "ARR';
+    const cleaned2c = cleanOcrText(input2c);
+    assert.strictEqual(cleaned2c, '雨中圓舞曲的「防水鞋」「會呼吸的雨衣」');
   });
 
   await t.test("Performance & ReDoS Guard: 50,000 characters process in under 200ms (ReDoS free)", () => {

@@ -244,7 +244,16 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
       rafId = null;
     }
     container.classList.remove("lmss-crop-active");
-    if (cropBtn) cropBtn.classList.remove("is-active");
+    if (cropBtn) {
+      cropBtn.classList.remove("is-active");
+      if (typeof cropBtn.blur === "function") cropBtn.blur();
+    }
+    if (typeof document !== "undefined" && typeof document.querySelectorAll === "function") {
+      document.querySelectorAll(".viewer-crop-ocr-btn, [data-viewer-action='cropOcr']").forEach((btn) => {
+        btn.classList.remove("is-active");
+        if (typeof btn.blur === "function") btn.blur();
+      });
+    }
     hintBanner.remove();
     overlay.remove();
     window.removeEventListener("pointermove", onDragMove, true);

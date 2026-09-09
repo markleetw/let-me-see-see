@@ -68,7 +68,205 @@ test("Unit: Lightbox Image Crop Bounds & Coordinate Mapping", async (t) => {
     assert.strictEqual(bounds.cropH, 0);
   });
 
+  await t.test("calculateImageCropBounds: extreme aspect ratio - panorama (4000x200)", () => {
+    const screenBox = { left: 500, top: 10, width: 600, height: 80 };
+    const imgRect = { left: 0, top: 0, width: 2000, height: 100 }; // 0.5x zoom
+    const naturalWidth = 4000;
+    const naturalHeight = 200;
+
+    const bounds = calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, 8);
+    assert.strictEqual(bounds.cropX, 992); // (500 * 2) - 8
+    assert.strictEqual(bounds.cropY, 12);  // (10 * 2) - 8
+    assert.strictEqual(bounds.cropW, 1216); // (600 * 2) + 16
+    assert.strictEqual(bounds.cropH, 176);  // (80 * 2) + 16
+    assert.ok(bounds.cropX + bounds.cropW <= naturalWidth);
+    assert.ok(bounds.cropY + bounds.cropH <= naturalHeight);
+  });
+
+  await t.test("calculateImageCropBounds: handles zero-dimension imgRect without crashing", () => {
+    const screenBox = { left: 10, top: 10, width: 50, height: 50 };
+    const imgRect = { left: 0, top: 0, width: 0, height: 0 };
+    const bounds = calculateImageCropBounds(screenBox, imgRect, 800, 600, 8);
+    assert.strictEqual(bounds.cropW, 0);
+    assert.strictEqual(bounds.cropH, 0);
+  });
+
+  await t.test("cropImageToDataUrl: draws to canvas and resets canvas dimensions to reclaim VRAM", () => {
+    let drawn = false;
+    let canvasWidthSet = 0;
+    let canvasHeightSet = 0;
+
+    const originalCreateElement = globalThis.document?.createElement;
+    const mockCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        drawImage: (img, sx, sy, sw, sh, dx, dy, dw, dh) => {
+          drawn = true;
+          assert.strictEqual(sx, 10);
+          assert.strictEqual(sy, 15);
+          assert.strictEqual(sw, 100);
+          assert.strictEqual(sh, 50);
+        }
+      }),
+      toDataURL: (type) => {
+        canvasWidthSet = mockCanvas.width;
+        canvasHeightSet = mockCanvas.height;
+        return `data:${type};base64,mockImageData`;
+      }
+    };
+
+    if (!globalThis.document) globalThis.document = {};
+    globalThis.document.createElement = (tag) => {
+      if (tag === "canvas") return mockCanvas;
+      return {};
+    };
+
+    try {
+      const mockImg = { complete: true };
+      const bounds = { cropX: 10, cropY: 15, cropW: 100, cropH: 50 };
+      const result = cropImageToDataUrl(mockImg, bounds);
+
+      assert.ok(drawn, "Must execute drawImage");
+      assert.strictEqual(canvasWidthSet, 100, "Canvas width set before drawing");
+      assert.strictEqual(canvasHeightSet, 50, "Canvas height set before drawing");
+      assert.strictEqual(mockCanvas.width, 0, "Canvas width must be reset to 0 after toDataURL");
+      assert.strictEqual(mockCanvas.height, 0, "Canvas height must be reset to 0 after toDataURL");
+      assert.strictEqual(result, "data:image/png;base64,mockImageData");
+    } finally {
+      if (originalCreateElement) {
+        globalThis.document.createElement = originalCreateElement;
+      } else {
+        delete globalThis.document;
+      }
+    }
+  });
+
+  await t.test("cropImageToDataUrl: catches drawing exceptions and returns null cleanly", () => {
+    if (!globalThis.document) globalThis.document = {};
+    const originalCreateElement = globalThis.document.createElement;
+
+    globalThis.document.createElement = (tag) => ({
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        drawImage: () => {
+          throw new Error("SecurityError: Tainted canvas");
+        }
+      }),
+      toDataURL: () => ""
+    });
+
+    try {
+      const result = cropImageToDataUrl({}, { cropX: 0, cropY: 0, cropW: 10, cropH: 10 });
+      assert.strictEqual(result, null, "Must safely return null on canvas drawing failure");
+    } finally {
+      if (originalCreateElement) {
+        globalThis.document.createElement = originalCreateElement;
+      } else {
+        delete globalThis.document;
+      }
+    }
+  });
+
   await t.test("cropImageToDataUrl: returns null on invalid or zero-size bounds", () => {
     assert.strictEqual(cropImageToDataUrl(null, { cropW: 0, cropH: 0 }), null);
   });
+
+  await t.test("startLightboxCrop: mounts overlay and cleans up on Escape key", async () => {
+    const { startLightboxCrop } = await import("../../src/content/ui/lightbox-crop.js");
+
+    const eventListeners = new Map();
+    const mockWindow = {
+      addEventListener: (type, fn) => {
+        if (!eventListeners.has(type)) eventListeners.set(type, []);
+        eventListeners.get(type).push(fn);
+      },
+      removeEventListener: (type, fn) => {
+        if (eventListeners.has(type)) {
+          eventListeners.set(type, eventListeners.get(type).filter((f) => f !== fn));
+        }
+      }
+    };
+
+    const containerClasses = new Set();
+    const children = [];
+    const canvasListeners = new Map();
+
+    const mockCanvas = {
+      addEventListener: (type, fn) => {
+        if (!canvasListeners.has(type)) canvasListeners.set(type, []);
+        canvasListeners.get(type).push(fn);
+      },
+      removeEventListener: (type, fn) => {
+        if (canvasListeners.has(type)) {
+          canvasListeners.set(type, canvasListeners.get(type).filter((f) => f !== fn));
+        }
+      }
+    };
+
+    const mockContainer = {
+      classList: {
+        add: (c) => containerClasses.add(c),
+        remove: (c) => containerClasses.delete(c),
+        contains: (c) => containerClasses.has(c)
+      },
+      querySelector: (sel) => {
+        if (sel === ".viewer-canvas") return mockCanvas;
+        return null;
+      },
+      appendChild: (el) => children.push(el)
+    };
+
+    const mockDoc = {
+      createElement: (tag) => {
+        const elListeners = new Map();
+        const element = {
+          tagName: tag.toUpperCase(),
+          className: "",
+          style: {},
+          querySelector: () => ({ addEventListener: () => {} }),
+          remove: () => {
+            const idx = children.indexOf(element);
+            if (idx !== -1) children.splice(idx, 1);
+          },
+          addEventListener: (type, fn) => {
+            if (!elListeners.has(type)) elListeners.set(type, []);
+            elListeners.get(type).push(fn);
+          }
+        };
+        return element;
+      }
+    };
+
+    const prevWindow = globalThis.window;
+    const prevDoc = globalThis.document;
+    globalThis.window = mockWindow;
+    globalThis.document = mockDoc;
+
+    try {
+      const mockViewer = {
+        viewer: mockContainer,
+        image: { complete: true, naturalWidth: 800, naturalHeight: 600 }
+      };
+
+      // 1. Activate crop
+      startLightboxCrop(mockViewer, () => {});
+      assert.ok(containerClasses.has("lmss-crop-active"), "Must add lmss-crop-active class");
+      assert.strictEqual(children.length, 2, "Must append hintBanner and selection box");
+
+      // 2. Simulate Escape key
+      const keydownHandlers = eventListeners.get("keydown") || [];
+      assert.ok(keydownHandlers.length > 0, "Must register keydown handler");
+      keydownHandlers[0]({ key: "Escape" });
+
+      assert.strictEqual(containerClasses.has("lmss-crop-active"), false, "Must remove lmss-crop-active class on Escape");
+      assert.strictEqual(children.length, 0, "Must remove hint banner and crop box");
+    } finally {
+      globalThis.window = prevWindow;
+      globalThis.document = prevDoc;
+    }
+  });
 });
+
+

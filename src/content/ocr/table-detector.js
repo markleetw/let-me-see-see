@@ -26,17 +26,21 @@ export function findColumnBins(rows, tolerance = 35) {
   if (allXStarts.length === 0) return [];
   allXStarts.sort((a, b) => a - b);
 
-  // Group close X coordinates into clusters
+  // Group close X coordinates into clusters via single-pass linear sweep
   const clusters = [];
+  let currentCluster = null;
+
   for (const x of allXStarts) {
-    const matched = clusters.find((c) => Math.abs(c.mean - x) <= tolerance);
-    if (matched) {
-      matched.points.push(x);
-      matched.mean = matched.points.reduce((sum, v) => sum + v, 0) / matched.points.length;
-      matched.min = Math.min(matched.min, x);
-      matched.max = Math.max(matched.max, x);
+    if (!currentCluster) {
+      currentCluster = { points: [x], mean: x, min: x, max: x };
+      clusters.push(currentCluster);
+    } else if (Math.abs(currentCluster.mean - x) <= tolerance) {
+      currentCluster.points.push(x);
+      currentCluster.mean = (currentCluster.mean * (currentCluster.points.length - 1) + x) / currentCluster.points.length;
+      currentCluster.max = x;
     } else {
-      clusters.push({ points: [x], mean: x, min: x, max: x });
+      currentCluster = { points: [x], mean: x, min: x, max: x };
+      clusters.push(currentCluster);
     }
   }
 

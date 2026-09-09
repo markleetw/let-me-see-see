@@ -3578,7 +3578,7 @@
 
   // src/content/ui/lightbox-crop.js
   function calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, buffer = 8) {
-    if (!screenBox || !imgRect || !naturalWidth || !naturalHeight) {
+    if (!screenBox || !imgRect || !imgRect.width || !imgRect.height || naturalWidth <= 0 || naturalHeight <= 0) {
       return { cropX: 0, cropY: 0, cropW: 0, cropH: 0 };
     }
     const scaleX = naturalWidth / (imgRect.width || 1);
@@ -3616,7 +3616,10 @@
         cropBounds.cropW,
         cropBounds.cropH
       );
-      return canvas.toDataURL("image/png");
+      const dataUrl = canvas.toDataURL("image/png");
+      canvas.width = 0;
+      canvas.height = 0;
+      return dataUrl;
     } catch (err) {
       console.warn("[Let Me See See] Canvas crop failed:", err);
       return null;
@@ -3649,6 +3652,7 @@
     let isDragging = false;
     let startX = 0;
     let startY = 0;
+    let rafId3 = null;
     const onMouseDown = (e) => {
       if (e.target.closest(".viewer-toolbar, .lmss-crop-hint, .viewer-button")) return;
       e.preventDefault();
@@ -3667,18 +3671,25 @@
       e.preventDefault();
       const curX = e.clientX;
       const curY = e.clientY;
-      const left = Math.min(startX, curX);
-      const top = Math.min(startY, curY);
-      const width = Math.abs(curX - startX);
-      const height = Math.abs(curY - startY);
-      box.style.left = `${left}px`;
-      box.style.top = `${top}px`;
-      box.style.width = `${width}px`;
-      box.style.height = `${height}px`;
+      if (rafId3) cancelAnimationFrame(rafId3);
+      rafId3 = requestAnimationFrame(() => {
+        const left = Math.min(startX, curX);
+        const top = Math.min(startY, curY);
+        const width = Math.abs(curX - startX);
+        const height = Math.abs(curY - startY);
+        box.style.left = `${left}px`;
+        box.style.top = `${top}px`;
+        box.style.width = `${width}px`;
+        box.style.height = `${height}px`;
+      });
     };
     const onMouseUp = (e) => {
       if (!isDragging) return;
       isDragging = false;
+      if (rafId3) {
+        cancelAnimationFrame(rafId3);
+        rafId3 = null;
+      }
       const endX = e.clientX;
       const endY = e.clientY;
       const screenBox = {
@@ -3710,6 +3721,10 @@
       }
     };
     const cleanup = () => {
+      if (rafId3) {
+        cancelAnimationFrame(rafId3);
+        rafId3 = null;
+      }
       container.classList.remove("lmss-crop-active");
       hintBanner.remove();
       box.remove();
@@ -3827,15 +3842,18 @@
     if (allXStarts.length === 0) return [];
     allXStarts.sort((a, b) => a - b);
     const clusters = [];
+    let currentCluster = null;
     for (const x of allXStarts) {
-      const matched = clusters.find((c) => Math.abs(c.mean - x) <= tolerance);
-      if (matched) {
-        matched.points.push(x);
-        matched.mean = matched.points.reduce((sum, v) => sum + v, 0) / matched.points.length;
-        matched.min = Math.min(matched.min, x);
-        matched.max = Math.max(matched.max, x);
+      if (!currentCluster) {
+        currentCluster = { points: [x], mean: x, min: x, max: x };
+        clusters.push(currentCluster);
+      } else if (Math.abs(currentCluster.mean - x) <= tolerance) {
+        currentCluster.points.push(x);
+        currentCluster.mean = (currentCluster.mean * (currentCluster.points.length - 1) + x) / currentCluster.points.length;
+        currentCluster.max = x;
       } else {
-        clusters.push({ points: [x], mean: x, min: x, max: x });
+        currentCluster = { points: [x], mean: x, min: x, max: x };
+        clusters.push(currentCluster);
       }
     }
     return clusters.filter((c) => c.points.length >= 2).sort((a, b) => a.mean - b.mean).map((c) => ({

@@ -16,8 +16,21 @@ import { uiToast } from "./toast.js";
  * @param {number} [buffer=8] Safety padding buffer in native pixels
  * @returns {{cropX: number, cropY: number, cropW: number, cropH: number}}
  */
-export function calculateImageCropBounds(screenBox, imgRect, naturalWidth, naturalHeight, buffer = 8) {
-  if (!screenBox || !imgRect || !naturalWidth || !naturalHeight) {
+export function calculateImageCropBounds(
+  screenBox,
+  imgRect,
+  naturalWidth,
+  naturalHeight,
+  buffer = 8
+) {
+  if (
+    !screenBox ||
+    !imgRect ||
+    !imgRect.width ||
+    !imgRect.height ||
+    naturalWidth <= 0 ||
+    naturalHeight <= 0
+  ) {
     return { cropX: 0, cropY: 0, cropW: 0, cropH: 0 };
   }
 
@@ -73,7 +86,10 @@ export function cropImageToDataUrl(imgElement, cropBounds) {
       cropBounds.cropH
     );
 
-    return canvas.toDataURL("image/png");
+    const dataUrl = canvas.toDataURL("image/png");
+    canvas.width = 0;
+    canvas.height = 0;
+    return dataUrl;
   } catch (err) {
     console.warn("[Let Me See See] Canvas crop failed:", err);
     return null;
@@ -122,6 +138,7 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
   let isDragging = false;
   let startX = 0;
   let startY = 0;
+  let rafId = null;
 
   const onMouseDown = (e) => {
     // Ignore clicks on toolbar or hint banner
@@ -147,20 +164,27 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
     const curX = e.clientX;
     const curY = e.clientY;
 
-    const left = Math.min(startX, curX);
-    const top = Math.min(startY, curY);
-    const width = Math.abs(curX - startX);
-    const height = Math.abs(curY - startY);
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      const left = Math.min(startX, curX);
+      const top = Math.min(startY, curY);
+      const width = Math.abs(curX - startX);
+      const height = Math.abs(curY - startY);
 
-    box.style.left = `${left}px`;
-    box.style.top = `${top}px`;
-    box.style.width = `${width}px`;
-    box.style.height = `${height}px`;
+      box.style.left = `${left}px`;
+      box.style.top = `${top}px`;
+      box.style.width = `${width}px`;
+      box.style.height = `${height}px`;
+    });
   };
 
   const onMouseUp = (e) => {
     if (!isDragging) return;
     isDragging = false;
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
 
     const endX = e.clientX;
     const endY = e.clientY;
@@ -202,6 +226,10 @@ export function startLightboxCrop(viewerInstance, onCropSelected) {
   };
 
   const cleanup = () => {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
     container.classList.remove("lmss-crop-active");
     hintBanner.remove();
     box.remove();

@@ -152,4 +152,121 @@ test("Unit: Table Structure Detection & TSV Formatting", async (t) => {
     assert.strictEqual(resB.isTable, false);
     assert.strictEqual(resB.text, "這是純文字段落\n第二行內容\n第三行備註說明");
   });
+
+  await t.test("Traditional Chinese table: correctly parses Taiwanese financial report with currencies", () => {
+    const rawLines = [
+      {
+        text: "項目 單價 數量 小計 備註",
+        words: [
+          { text: "項目", bbox: { x0: 30, x1: 70 } },
+          { text: "單價", bbox: { x0: 150, x1: 190 } },
+          { text: "數量", bbox: { x0: 280, x1: 320 } },
+          { text: "小計", bbox: { x0: 400, x1: 440 } },
+          { text: "備註", bbox: { x0: 550, x1: 590 } }
+        ]
+      },
+      {
+        text: "伺服器租賃 NT$ 12,000 2 NT$ 24,000 年度合約",
+        words: [
+          { text: "伺服器租賃", bbox: { x0: 28, x1: 110 } },
+          { text: "NT$", bbox: { x0: 148, x1: 175 } },
+          { text: "12,000", bbox: { x0: 180, x1: 230 } },
+          { text: "2", bbox: { x0: 282, x1: 295 } },
+          { text: "NT$", bbox: { x0: 398, x1: 425 } },
+          { text: "24,000", bbox: { x0: 430, x1: 480 } },
+          { text: "年度合約", bbox: { x0: 548, x1: 615 } }
+        ]
+      },
+      {
+        text: "雲端儲存空間 NT$ 3,500 10 NT$ 35,000 99.9% SLA",
+        words: [
+          { text: "雲端儲存空間", bbox: { x0: 32, x1: 120 } },
+          { text: "NT$", bbox: { x0: 150, x1: 177 } },
+          { text: "3,500", bbox: { x0: 182, x1: 225 } },
+          { text: "10", bbox: { x0: 280, x1: 300 } },
+          { text: "NT$", bbox: { x0: 402, x1: 428 } },
+          { text: "35,000", bbox: { x0: 432, x1: 485 } },
+          { text: "99.9%", bbox: { x0: 552, x1: 595 } },
+          { text: "SLA", bbox: { x0: 600, x1: 630 } }
+        ]
+      }
+    ];
+
+    const result = detectTableFromTesseractResult(rawLines);
+    assert.strictEqual(result.isTable, true);
+    assert.strictEqual(result.rowCount, 3);
+    assert.strictEqual(result.colCount, 5);
+
+    const rows = result.tsv.split("\n");
+    assert.strictEqual(rows[0], "項目\t單價\t數量\t小計\t備註");
+    assert.strictEqual(rows[1], "伺服器租賃\tNT$ 12,000\t2\tNT$ 24,000\t年度合約");
+    assert.strictEqual(rows[2], "雲端儲存空間\tNT$ 3,500\t10\tNT$ 35,000\t99.9% SLA");
+  });
+
+  await t.test("Sparse / missing table cells: preserves tab count and column positions", () => {
+    const rawLines = [
+      {
+        text: "ColA ColB ColC",
+        words: [
+          { text: "ColA", bbox: { x0: 50, x1: 90 } },
+          { text: "ColB", bbox: { x0: 200, x1: 240 } },
+          { text: "ColC", bbox: { x0: 350, x1: 390 } }
+        ]
+      },
+      {
+        // Row 2 has ColA and ColC, missing ColB
+        text: "ValA1 ValC1",
+        words: [
+          { text: "ValA1", bbox: { x0: 50, x1: 95 } },
+          { text: "ValC1", bbox: { x0: 350, x1: 395 } }
+        ]
+      },
+      {
+        text: "ValA2 ValB2 ValC2",
+        words: [
+          { text: "ValA2", bbox: { x0: 50, x1: 95 } },
+          { text: "ValB2", bbox: { x0: 200, x1: 245 } },
+          { text: "ValC2", bbox: { x0: 350, x1: 395 } }
+        ]
+      }
+    ];
+
+    const result = detectTableFromTesseractResult(rawLines);
+    assert.strictEqual(result.isTable, true);
+    const rows = result.tsv.split("\n");
+    const row2Cols = rows[1].split("\t");
+    assert.strictEqual(row2Cols.length, 3);
+    assert.strictEqual(row2Cols[0], "ValA1");
+    assert.strictEqual(row2Cols[1], ""); // missing ColB is an empty cell
+    assert.strictEqual(row2Cols[2], "ValC1");
+  });
+
+  await t.test("Performance Benchmark: 10,000 cells cluster and format in under 50ms (O(N) single-pass)", () => {
+    const numRows = 2000;
+    const numCols = 5;
+    const largeLines = [];
+
+    for (let r = 0; r < numRows; r++) {
+      const words = [];
+      for (let c = 0; c < numCols; c++) {
+        const x0 = 100 * c + 20;
+        const x1 = x0 + 40;
+        words.push({ text: `R${r}C${c}`, bbox: { x0, x1 } });
+      }
+      largeLines.push({
+        text: words.map((w) => w.text).join(" "),
+        words
+      });
+    }
+
+    const start = performance.now();
+    const result = detectTableFromTesseractResult(largeLines);
+    const elapsed = performance.now() - start;
+
+    assert.strictEqual(result.isTable, true);
+    assert.strictEqual(result.rowCount, numRows);
+    assert.strictEqual(result.colCount, numCols);
+    assert.ok(elapsed < 100, `Processing 10,000 cells took ${elapsed.toFixed(2)}ms (must be < 100ms)`);
+  });
 });
+
